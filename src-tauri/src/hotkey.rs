@@ -2,6 +2,7 @@
 //! 在獨立執行緒以 rdev::listen 監聽鍵盤，偵測目標鍵（預設右 Alt）的「按下」transition，
 //! 每次按下送出一個 toggle 訊號。按住自動重複的 KeyPress 會被 `down` 旗標濾掉。
 
+use crate::state::OutputMode;
 use rdev::{listen, Event, EventType, Key};
 use std::sync::mpsc::Sender;
 
@@ -19,18 +20,30 @@ pub fn parse_key(s: &str) -> Option<Key> {
     }
 }
 
-/// 阻塞式監聽迴圈，應在獨立執行緒呼叫。每次目標鍵按下送一個 `()` 到 channel。
-pub fn run(target: Key, tx: Sender<()>) {
-    let mut down = false;
+/// 阻塞式監聽迴圈，應在獨立執行緒呼叫。同時監聽主熱鍵與（可選的）翻譯熱鍵：
+/// 主熱鍵按下送 `OutputMode::Direct`，翻譯熱鍵按下送 `OutputMode::Translate`。
+/// `translate_key` 為 `None` 時只監聽主熱鍵，行為與翻譯功能停用前完全相同。
+pub fn run(main_key: Key, translate_key: Option<Key>, tx: Sender<OutputMode>) {
+    let mut main_down = false;
+    let mut translate_down = false;
     let callback = move |event: Event| match event.event_type {
-        EventType::KeyPress(k) if k == target => {
-            if !down {
-                down = true;
-                let _ = tx.send(());
+        EventType::KeyPress(k) if k == main_key => {
+            if !main_down {
+                main_down = true;
+                let _ = tx.send(OutputMode::Direct);
             }
         }
-        EventType::KeyRelease(k) if k == target => {
-            down = false;
+        EventType::KeyRelease(k) if k == main_key => {
+            main_down = false;
+        }
+        EventType::KeyPress(k) if translate_key == Some(k) => {
+            if !translate_down {
+                translate_down = true;
+                let _ = tx.send(OutputMode::Translate);
+            }
+        }
+        EventType::KeyRelease(k) if translate_key == Some(k) => {
+            translate_down = false;
         }
         _ => {}
     };

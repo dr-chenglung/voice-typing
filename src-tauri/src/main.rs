@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
 use tauri::Manager;
+use crate::state::OutputMode;
 
 /// 全 app 共用的 WebView2/Chromium 啟動參數，**所有視窗都必須套用同一組**。
 ///
@@ -49,7 +50,7 @@ fn main() {
     // 麥克風即時音量（f32 bits），由音訊執行緒寫入、overlay 視窗讀取。
     let level = Arc::new(AtomicU32::new(0));
     // 熱鍵執行緒 → controller 執行緒 的 toggle 訊號。
-    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let (tx, rx) = std::sync::mpsc::channel::<OutputMode>();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -68,19 +69,36 @@ fn main() {
                 panic!(
                     "{}",
                     anyhow!(
-                        "無法辨識的熱鍵設定: {:?}（可用 right_alt / right_ctrl 等）",
+                        "無法辨識的熱鍵設定: {:?}（可用 right_alt / right_ctrl / right_shift / scroll_lock / pause / insert 等）",
                         cfg.hotkey
                     )
                 )
             });
+            let translate_key = match cfg.resolved_translate_key() {
+                Ok(k) => k,
+                Err(msg) => {
+                    eprintln!("[config] {msg}");
+                    notify::show(&handle, "翻譯熱鍵已停用", &msg);
+                    None
+                }
+            };
 
             println!("================ 語音免打字工具 ================");
             println!("熱鍵: {}（toggle：按一下開始錄音、再按一下停止）", cfg.hotkey);
             println!(
-                "STT: {} | 校正: {}（{}）",
+                "翻譯熱鍵: {}",
+                if translate_key.is_some() {
+                    cfg.translate_hotkey.as_str()
+                } else {
+                    "未啟用"
+                }
+            );
+            println!(
+                "STT: {} | 校正: {}（{}） | 翻譯目標語言: {}",
                 cfg.stt_model,
                 cfg.llm_model,
-                if cfg.enable_correction { "開啟" } else { "關閉" }
+                if cfg.enable_correction { "開啟" } else { "關閉" },
+                cfg.target_language
             );
             println!("常駐系統托盤；於托盤選單按「設定」可調整、按「結束」可離開。");
             println!("===============================================");
@@ -93,7 +111,7 @@ fn main() {
             overlay::create_window(&handle, level.clone())?;
 
             // 熱鍵監聽執行緒。
-            std::thread::spawn(move || hotkey::run(hotkey, tx));
+            std::thread::spawn(move || hotkey::run(hotkey, translate_key, tx));
 
             // controller 執行緒（管理錄音 + 管線）。
             let ctrl_handle = handle.clone();
