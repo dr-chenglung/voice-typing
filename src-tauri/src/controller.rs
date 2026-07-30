@@ -73,7 +73,9 @@ pub fn run(
                         if let Err(e) = typer::type_text(&text) {
                             flash_error(&app, &format!("輸入失敗: {e}"));
                         } else {
-                            history::append(&app, &text);
+                            // 目前一律傳「非翻譯」；翻譯模式的真實中繼資訊由 Task 8 的
+                            // process()/Output 重構接上。
+                            history::append(&app, &text, false, "", "");
                         }
                     }
                     Err(e) => flash_error(&app, &e.to_string()),
