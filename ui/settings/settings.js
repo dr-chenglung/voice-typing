@@ -17,7 +17,36 @@ const vocabularyInput = document.getElementById("vocabulary");
 const enableFormattingInput = document.getElementById("enable_formatting");
 const enableCorrectionInput = document.getElementById("enable_correction");
 const hotkeySelect = document.getElementById("hotkey");
+const targetLanguageSelect = document.getElementById("target_language_select");
+const targetLanguageCustomRow = document.getElementById("target_language_custom_row");
+const targetLanguageCustomInput = document.getElementById("target_language_custom");
+const translateHotkeySelect = document.getElementById("translate_hotkey");
 const statusEl = document.getElementById("status");
+
+const PRESET_LANGUAGES = [
+  "English",
+  "Japanese",
+  "Korean",
+  "Simplified Chinese",
+  "Traditional Chinese",
+  "Spanish",
+  "Vietnamese",
+];
+
+function syncTargetLanguageCustomRow() {
+  targetLanguageCustomRow.classList.toggle(
+    "hidden",
+    targetLanguageSelect.value !== "__custom__"
+  );
+}
+
+function resolvedTargetLanguage() {
+  return targetLanguageSelect.value === "__custom__"
+    ? targetLanguageCustomInput.value.trim()
+    : targetLanguageSelect.value;
+}
+
+targetLanguageSelect.addEventListener("change", syncTargetLanguageCustomRow);
 
 let originalHotkey = "";
 
@@ -36,6 +65,15 @@ async function load() {
   vocabularyInput.value = cfg.vocabulary;
   enableFormattingInput.checked = cfg.enable_formatting;
   enableCorrectionInput.checked = cfg.enable_correction;
+  if (PRESET_LANGUAGES.includes(cfg.target_language)) {
+    targetLanguageSelect.value = cfg.target_language;
+    targetLanguageCustomInput.value = "";
+  } else {
+    targetLanguageSelect.value = "__custom__";
+    targetLanguageCustomInput.value = cfg.target_language;
+  }
+  syncTargetLanguageCustomRow();
+  translateHotkeySelect.value = cfg.translate_hotkey;
   hotkeySelect.value = cfg.hotkey;
   originalHotkey = cfg.hotkey;
 }
@@ -56,6 +94,8 @@ form.addEventListener("submit", async (ev) => {
         enable_formatting: enableFormattingInput.checked,
         enable_correction: enableCorrectionInput.checked,
         hotkey: hotkeySelect.value,
+        target_language: resolvedTargetLanguage(),
+        translate_hotkey: translateHotkeySelect.value,
       },
     });
     sttApiKeyInput.value = "";

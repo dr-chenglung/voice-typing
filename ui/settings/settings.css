@@ -98,3 +98,7 @@ button:hover {
   font-size: 12px;
   color: #9a9da3;
 }
+
+.hidden {
+  display: none;
+}
