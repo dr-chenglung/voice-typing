@@ -4,7 +4,6 @@
 //! 因為安裝後執行檔所在目錄通常沒有寫入權限；讀取時向後相容舊版（執行檔旁/當前目錄）的設定檔。
 
 use anyhow::{bail, Context, Result};
-use rdev::Key;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
@@ -39,12 +38,13 @@ pub struct Config {
     #[serde(default)]
     pub enable_formatting: bool,
     /// 翻譯輸出的目標語言（英文語言名稱，如 "English"／"Japanese"／"Traditional Chinese"）。
-    /// 只決定「翻成什麼」，是否翻譯完全由按下哪顆熱鍵決定，與此欄位無關。
+    /// 只決定「翻成什麼」，是否翻譯由 `translate_mode_active` 決定，與此欄位無關。
     #[serde(default = "default_target_language")]
     pub target_language: String,
-    /// 翻譯專用熱鍵；空字串＝停用翻譯功能。不可與 `hotkey` 相同（見 `resolved_translate_key`）。
-    #[serde(default = "default_translate_hotkey")]
-    pub translate_hotkey: String,
+    /// 翻譯模式開關：開啟時，下一次用熱鍵開始的錄音會被翻譯成 target_language，
+    /// 而非一般校正。開始錄音當下讀取，不需要重啟程式即可生效。
+    #[serde(default)]
+    pub translate_mode_active: bool,
 }
 
 fn default_stt_api_url() -> String {
@@ -67,9 +67,6 @@ fn default_hotkey() -> String {
 }
 fn default_target_language() -> String {
     "English".to_string()
-}
-fn default_translate_hotkey() -> String {
-    "right_ctrl".to_string()
 }
 
 impl Config {
@@ -113,26 +110,6 @@ impl Config {
         std::fs::write(&path, s).with_context(|| format!("寫入設定檔失敗: {}", path.display()))?;
         println!("[config] 已儲存設定檔: {}", path.display());
         Ok(())
-    }
-
-    /// 解析翻譯熱鍵設定：
-    /// - 欄位空字串 → `Ok(None)`（使用者明確不啟用，非錯誤）。
-    /// - 能解析且與主熱鍵不同的按鍵 → `Ok(Some(key))`（啟用）。
-    /// - 無法辨識，或解析後與主熱鍵是同一顆鍵 → `Err(訊息)`，呼叫端應停用翻譯熱鍵並提示使用者。
-    pub fn resolved_translate_key(&self) -> Result<Option<Key>, String> {
-        let raw = self.translate_hotkey.trim();
-        if raw.is_empty() {
-            return Ok(None);
-        }
-        let Some(key) = crate::hotkey::parse_key(raw) else {
-            return Err(format!("無法辨識的翻譯熱鍵設定: {raw:?}"));
-        };
-        match crate::hotkey::parse_key(&self.hotkey) {
-            Some(main_key) if main_key == key => Err(format!(
-                "翻譯熱鍵與主熱鍵相同（{raw:?}），已停用翻譯功能"
-            )),
-            _ => Ok(Some(key)),
-        }
     }
 }
 
@@ -179,48 +156,24 @@ fn find_config(app: &AppHandle) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
-    fn make_config(hotkey: &str, translate_hotkey: &str) -> Config {
-        let mut cfg: Config = toml::from_str("").unwrap();
-        cfg.hotkey = hotkey.to_string();
-        cfg.translate_hotkey = translate_hotkey.to_string();
-        cfg
-    }
-
     #[test]
-    fn defaults_are_english_and_right_ctrl() {
+    fn target_language_default_is_english() {
         let cfg: Config = toml::from_str("").unwrap();
         assert_eq!(cfg.target_language, "English");
-        assert_eq!(cfg.translate_hotkey, "right_ctrl");
     }
 
     #[test]
-    fn resolved_translate_key_enabled_by_default() {
+    fn translate_mode_active_defaults_to_false() {
         let cfg: Config = toml::from_str("").unwrap();
-        assert!(matches!(cfg.resolved_translate_key(), Ok(Some(_))));
+        assert!(!cfg.translate_mode_active);
     }
 
     #[test]
-    fn resolved_translate_key_none_when_empty() {
-        let cfg = make_config("right_alt", "");
-        assert!(matches!(cfg.resolved_translate_key(), Ok(None)));
-    }
-
-    #[test]
-    fn resolved_translate_key_conflict_when_same_as_main() {
-        let cfg = make_config("right_alt", "right_alt");
-        assert!(cfg.resolved_translate_key().is_err());
-    }
-
-    #[test]
-    fn resolved_translate_key_conflict_across_aliases() {
-        // "alt_right" 與 "right_alt" 解析後是同一顆鍵（Key::AltGr），也要視為衝突。
-        let cfg = make_config("right_alt", "alt_right");
-        assert!(cfg.resolved_translate_key().is_err());
-    }
-
-    #[test]
-    fn resolved_translate_key_err_when_unparseable() {
-        let cfg = make_config("right_alt", "no_such_key");
-        assert!(cfg.resolved_translate_key().is_err());
+    fn translate_mode_active_round_trips_through_toml() {
+        let mut cfg: Config = toml::from_str("").unwrap();
+        cfg.translate_mode_active = true;
+        let s = toml::to_string_pretty(&cfg).unwrap();
+        let back: Config = toml::from_str(&s).unwrap();
+        assert!(back.translate_mode_active);
     }
 }

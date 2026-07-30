@@ -57,7 +57,7 @@ fn open_settings_window(app: &AppHandle) {
         WebviewUrl::App("settings/index.html".into()),
     )
     .title("設定 Settings")
-    .inner_size(420.0, 520.0)
+    .inner_size(480.0, 780.0)
     .resizable(false)
     .additional_browser_args(crate::WEBVIEW_ARGS)
     .build()
@@ -84,6 +84,21 @@ fn open_history_window(app: &AppHandle) {
     .build()
     {
         eprintln!("[tray] 開啟歷史紀錄視窗失敗: {e}");
+    }
+}
+
+/// 更新閒置狀態的 tooltip，附加目前的翻譯模式；由呼叫端（main.rs 啟動時、
+/// controller.rs 狀態機回到 Idle 時）保證只在真的處於 Idle 時呼叫。
+pub fn set_idle_tooltip(app: &AppHandle, translate_mode_active: bool, target_language: &str) {
+    let mode_suffix = if translate_mode_active {
+        format!("｜翻譯模式 → {target_language}")
+    } else {
+        "｜轉錄模式".to_string()
+    };
+    let tip = format!("語音免打字（閒置{mode_suffix}）");
+    if let Some(tray) = app.try_state::<TrayHandle>() {
+        let _ = tray.0.set_icon(Some(mic_icon()));
+        let _ = tray.0.set_tooltip(Some(tip));
     }
 }
 

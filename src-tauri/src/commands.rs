@@ -27,7 +27,7 @@ pub struct ConfigView {
     pub enable_formatting: bool,
 
     pub target_language: String,
-    pub translate_hotkey: String,
+    pub translate_mode_active: bool,
 }
 
 #[derive(Deserialize)]
@@ -49,7 +49,7 @@ pub struct ConfigUpdate {
     pub enable_formatting: bool,
 
     pub target_language: String,
-    pub translate_hotkey: String,
+    pub translate_mode_active: bool,
 }
 
 #[tauri::command]
@@ -67,7 +67,7 @@ pub fn get_config(cfg: State<'_, Arc<Mutex<Config>>>) -> ConfigView {
         vocabulary: c.vocabulary.clone(),
         enable_formatting: c.enable_formatting,
         target_language: c.target_language.clone(),
-        translate_hotkey: c.translate_hotkey.clone(),
+        translate_mode_active: c.translate_mode_active,
     }
 }
 
@@ -76,21 +76,6 @@ fn validate_main_hotkey(hotkey: &str) -> Result<(), String> {
     match crate::hotkey::parse_key(hotkey.trim()) {
         Some(_) => Ok(()),
         None => Err(format!("無法辨識的熱鍵設定: {hotkey:?}")),
-    }
-}
-
-/// 驗證翻譯熱鍵設定：非空時必須能解析、且不可與主熱鍵解析後是同一顆鍵。
-fn validate_translate_hotkey(hotkey: &str, translate_hotkey: &str) -> Result<(), String> {
-    let translate = translate_hotkey.trim();
-    if translate.is_empty() {
-        return Ok(());
-    }
-    let Some(t_key) = crate::hotkey::parse_key(translate) else {
-        return Err(format!("無法辨識的翻譯熱鍵設定: {translate:?}"));
-    };
-    match crate::hotkey::parse_key(hotkey.trim()) {
-        Some(m_key) if m_key == t_key => Err("翻譯熱鍵不可與主熱鍵相同".to_string()),
-        _ => Ok(()),
     }
 }
 
@@ -107,7 +92,6 @@ fn validate_target_language(target_language: &str) -> Result<(), String> {
 /// 存檔前的全部驗證，依序執行、任何一項失敗就整體拒絕存檔（不修改任何設定狀態）。
 fn validate_config_update(update: &ConfigUpdate) -> Result<(), String> {
     validate_main_hotkey(&update.hotkey)?;
-    validate_translate_hotkey(&update.hotkey, &update.translate_hotkey)?;
     validate_target_language(&update.target_language)?;
     Ok(())
 }
@@ -136,7 +120,7 @@ pub fn save_config(
         c.vocabulary = update.vocabulary;
         c.enable_formatting = update.enable_formatting;
         c.target_language = update.target_language;
-        c.translate_hotkey = update.translate_hotkey;
+        c.translate_mode_active = update.translate_mode_active;
         c.clone()
     };
     snapshot.save(&app).map_err(|e| e.to_string())
@@ -157,31 +141,6 @@ pub fn clear_history(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn allows_empty_translate_hotkey() {
-        assert!(validate_translate_hotkey("right_alt", "").is_ok());
-    }
-
-    #[test]
-    fn rejects_same_as_main() {
-        assert!(validate_translate_hotkey("right_alt", "right_alt").is_err());
-    }
-
-    #[test]
-    fn rejects_same_key_via_alias() {
-        assert!(validate_translate_hotkey("right_alt", "alt_right").is_err());
-    }
-
-    #[test]
-    fn rejects_unparseable() {
-        assert!(validate_translate_hotkey("right_alt", "caps_lock").is_err());
-    }
-
-    #[test]
-    fn accepts_distinct_valid_keys() {
-        assert!(validate_translate_hotkey("right_alt", "right_ctrl").is_ok());
-    }
 
     #[test]
     fn validate_main_hotkey_accepts_known_key() {
@@ -208,9 +167,8 @@ mod tests {
         assert!(validate_target_language("English").is_ok());
     }
 
-    #[test]
-    fn validate_config_update_rejects_unparseable_main_hotkey() {
-        let update = ConfigUpdate {
+    fn sample_update(hotkey: &str, target_language: &str, translate_mode_active: bool) -> ConfigUpdate {
+        ConfigUpdate {
             stt_api_key: String::new(),
             stt_api_url: String::new(),
             stt_model: String::new(),
@@ -218,50 +176,29 @@ mod tests {
             llm_api_url: String::new(),
             llm_model: String::new(),
             enable_correction: true,
-            hotkey: "caps_lock".to_string(),
+            hotkey: hotkey.to_string(),
             vocabulary: String::new(),
             enable_formatting: false,
-            target_language: "English".to_string(),
-            translate_hotkey: String::new(),
-        };
+            target_language: target_language.to_string(),
+            translate_mode_active,
+        }
+    }
+
+    #[test]
+    fn validate_config_update_rejects_unparseable_main_hotkey() {
+        let update = sample_update("caps_lock", "English", false);
         assert!(validate_config_update(&update).is_err());
     }
 
     #[test]
     fn validate_config_update_rejects_empty_target_language() {
-        let update = ConfigUpdate {
-            stt_api_key: String::new(),
-            stt_api_url: String::new(),
-            stt_model: String::new(),
-            llm_api_key: String::new(),
-            llm_api_url: String::new(),
-            llm_model: String::new(),
-            enable_correction: true,
-            hotkey: "right_alt".to_string(),
-            vocabulary: String::new(),
-            enable_formatting: false,
-            target_language: "   ".to_string(),
-            translate_hotkey: String::new(),
-        };
+        let update = sample_update("right_alt", "   ", false);
         assert!(validate_config_update(&update).is_err());
     }
 
     #[test]
     fn validate_config_update_accepts_valid_update() {
-        let update = ConfigUpdate {
-            stt_api_key: String::new(),
-            stt_api_url: String::new(),
-            stt_model: String::new(),
-            llm_api_key: String::new(),
-            llm_api_url: String::new(),
-            llm_model: String::new(),
-            enable_correction: true,
-            hotkey: "right_alt".to_string(),
-            vocabulary: String::new(),
-            enable_formatting: false,
-            target_language: "English".to_string(),
-            translate_hotkey: "right_ctrl".to_string(),
-        };
+        let update = sample_update("right_alt", "English", true);
         assert!(validate_config_update(&update).is_ok());
     }
 }

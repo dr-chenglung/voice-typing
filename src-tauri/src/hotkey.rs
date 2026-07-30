@@ -1,12 +1,7 @@
 //! 熱鍵監聽（規格第 3.1 節）。
-//! 在獨立執行緒以 rdev::listen 監聽鍵盤，同時偵測主熱鍵（預設右 Alt）與可選的翻譯熱鍵的
-//! 「按下」transition，各自按下送出對應的 `OutputMode`。每顆鍵各自有獨立的 down 旗標，
-//! 濾掉按住自動重複的 KeyPress（見 `run()`）。
-//!
-//! 可用鍵（見 `parse_key`）：right_alt／right_ctrl／scroll_lock／pause／insert，共 5 種。
-//! 注意：right_shift 刻意不提供——持續右 Shift 打大寫字母是常見操作，會與正常打字衝突。
+//! 在獨立執行緒以 rdev::listen 監聽鍵盤，偵測目標鍵（預設右 Alt）的「按下」transition，
+//! 每次按下送出一個 toggle 訊號。按住自動重複的 KeyPress 會被 `down` 旗標濾掉。
 
-use crate::state::OutputMode;
 use rdev::{listen, Event, EventType, Key};
 use std::sync::mpsc::Sender;
 
@@ -16,37 +11,22 @@ pub fn parse_key(s: &str) -> Option<Key> {
     match norm.as_str() {
         "right_alt" | "alt_right" | "altgr" | "ralt" => Some(Key::AltGr),
         "right_ctrl" | "ctrl_right" | "right_control" | "rctrl" => Some(Key::ControlRight),
-        "scroll_lock" | "scrolllock" => Some(Key::ScrollLock),
-        "pause" | "pause_break" => Some(Key::Pause),
-        "insert" | "ins" => Some(Key::Insert),
         _ => None,
     }
 }
 
-/// 阻塞式監聽迴圈，應在獨立執行緒呼叫。同時監聽主熱鍵與（可選的）翻譯熱鍵：
-/// 主熱鍵按下送 `OutputMode::Direct`，翻譯熱鍵按下送 `OutputMode::Translate`。
-/// `translate_key` 為 `None` 時只監聽主熱鍵，行為與翻譯功能停用前完全相同。
-pub fn run(main_key: Key, translate_key: Option<Key>, tx: Sender<OutputMode>) {
-    let mut main_down = false;
-    let mut translate_down = false;
+/// 阻塞式監聽迴圈，應在獨立執行緒呼叫。每次目標鍵按下送一個 `()` 到 channel。
+pub fn run(target: Key, tx: Sender<()>) {
+    let mut down = false;
     let callback = move |event: Event| match event.event_type {
-        EventType::KeyPress(k) if k == main_key => {
-            if !main_down {
-                main_down = true;
-                let _ = tx.send(OutputMode::Direct);
+        EventType::KeyPress(k) if k == target => {
+            if !down {
+                down = true;
+                let _ = tx.send(());
             }
         }
-        EventType::KeyRelease(k) if k == main_key => {
-            main_down = false;
-        }
-        EventType::KeyPress(k) if translate_key == Some(k) => {
-            if !translate_down {
-                translate_down = true;
-                let _ = tx.send(OutputMode::Translate);
-            }
-        }
-        EventType::KeyRelease(k) if translate_key == Some(k) => {
-            translate_down = false;
+        EventType::KeyRelease(k) if k == target => {
+            down = false;
         }
         _ => {}
     };
@@ -72,24 +52,16 @@ mod tests {
     }
 
     #[test]
-    fn parses_scroll_lock() {
-        assert_eq!(parse_key("scroll_lock"), Some(Key::ScrollLock));
-        assert_eq!(parse_key("scrolllock"), Some(Key::ScrollLock));
-    }
-
-    #[test]
-    fn parses_pause() {
-        assert_eq!(parse_key("pause"), Some(Key::Pause));
-    }
-
-    #[test]
-    fn parses_insert() {
-        assert_eq!(parse_key("insert"), Some(Key::Insert));
-        assert_eq!(parse_key("ins"), Some(Key::Insert));
-    }
-
-    #[test]
     fn rejects_unknown_key() {
         assert_eq!(parse_key("caps_lock"), None);
+    }
+
+    #[test]
+    fn no_longer_recognizes_removed_keys() {
+        // 這三種鍵是雙熱鍵時代為了避免兩顆熱鍵搶用鍵位而加的，單熱鍵架構下移除，
+        // 這個測試鎖定「確實已經移除辨識能力」，不是單純沒測到。
+        assert_eq!(parse_key("scroll_lock"), None);
+        assert_eq!(parse_key("pause"), None);
+        assert_eq!(parse_key("insert"), None);
     }
 }

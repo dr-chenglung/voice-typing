@@ -1,7 +1,8 @@
 //! 流程協調（規格第 6 節狀態機）。
-//! 在獨立執行緒接收熱鍵 toggle 訊號（帶輸出模式），管理 cpal 錄音串流，並在停止後跑
-//! STT → （校正或翻譯）→ enigo 的管線。網路請求用內建的 tokio runtime 以 block_on 執行；
-//! 本執行緒即「背景工作執行緒」，不會阻塞熱鍵監聽或主執行緒（托盤/overlay）。
+//! 在獨立執行緒接收熱鍵 toggle 訊號，管理 cpal 錄音串流，並在停止後跑
+//! STT → （校正或翻譯，依設定檔的 translate_mode_active 決定）→ enigo 的管線。
+//! 網路請求用內建的 tokio runtime 以 block_on 執行；本執行緒即「背景工作執行緒」，
+//! 不會阻塞熱鍵監聽或主執行緒（托盤/overlay）。
 
 use std::sync::atomic::AtomicU32;
 use std::sync::mpsc::Receiver;
@@ -41,7 +42,7 @@ impl Output {
     }
 }
 
-pub fn run(rx: Receiver<OutputMode>, app: AppHandle, cfg: Arc<Mutex<Config>>, level: Arc<AtomicU32>) {
+pub fn run(rx: Receiver<()>, app: AppHandle, cfg: Arc<Mutex<Config>>, level: Arc<AtomicU32>) {
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -56,30 +57,39 @@ pub fn run(rx: Receiver<OutputMode>, app: AppHandle, cfg: Arc<Mutex<Config>>, le
 
     let mut state = AppState::Idle;
     let mut recorder: Option<Recorder> = None;
-    // 本次錄音的輸出模式：由「開始錄音當下收到的訊號」決定，全程不因中途按錯鍵而改變。
+    // 本次錄音的輸出模式：在 Idle→Recording 轉換當下讀取設定檔決定，全程不變
+    // （即使錄音/處理中途去設定視窗改了開關，這次錄音仍照開始當下的值跑完）。
     let mut session_mode = OutputMode::Direct;
 
     // 每收到一個訊號就推進狀態機。
-    while let Ok(mode) = rx.recv() {
+    while rx.recv().is_ok() {
         match state {
-            AppState::Idle => match audio::start(level.clone()) {
-                Ok(r) => {
-                    recorder = Some(r);
-                    session_mode = mode;
-                    state = AppState::Recording;
-                    set_state(&app, state, session_mode);
-                    sound::play_start();
+            AppState::Idle => {
+                let translate_mode_active = cfg.lock().unwrap().translate_mode_active;
+                let mode = if translate_mode_active {
+                    OutputMode::Translate
+                } else {
+                    OutputMode::Direct
+                };
+                match audio::start(level.clone()) {
+                    Ok(r) => {
+                        recorder = Some(r);
+                        session_mode = mode;
+                        state = AppState::Recording;
+                        set_state(&app, state, session_mode, &cfg);
+                        sound::play_start();
+                    }
+                    Err(e) => {
+                        flash_error(&app, &format!("錄音啟動失敗: {e}"));
+                        state = AppState::Idle;
+                        set_state(&app, state, session_mode, &cfg);
+                    }
                 }
-                Err(e) => {
-                    flash_error(&app, &format!("錄音啟動失敗: {e}"));
-                    state = AppState::Idle;
-                    set_state(&app, state, session_mode);
-                }
-            },
+            }
             AppState::Recording => {
                 sound::play_stop();
                 state = AppState::Processing;
-                set_state(&app, state, session_mode);
+                set_state(&app, state, session_mode, &cfg);
 
                 let rec = recorder.take().expect("Recording 狀態必有 recorder");
                 let snapshot = cfg.lock().unwrap().clone();
@@ -101,7 +111,7 @@ pub fn run(rx: Receiver<OutputMode>, app: AppHandle, cfg: Arc<Mutex<Config>>, le
                 }
 
                 state = AppState::Idle;
-                set_state(&app, state, session_mode);
+                set_state(&app, state, session_mode, &cfg);
             }
             // Processing 期間忽略訊號（規格：背景處理中不重複觸發）。
             AppState::Processing => {}
@@ -109,13 +119,25 @@ pub fn run(rx: Receiver<OutputMode>, app: AppHandle, cfg: Arc<Mutex<Config>>, le
     }
 }
 
-/// 依狀態更新托盤圖示，並同步 overlay 視窗顯示/隱藏（僅錄音中顯示）；
-/// `mode` 決定 overlay 顯示一般或翻譯配色。
-fn set_state(app: &AppHandle, state: AppState, mode: OutputMode) {
-    tray::set_state(app, state);
+/// 依狀態更新托盤圖示／tooltip，並同步 overlay 視窗顯示/隱藏（僅錄音中顯示）。
+/// `Idle` 時的 tooltip 要顯示「當下設定檔的即時模式」（不是 `session_mode`，因為使用者
+/// 可能在錄音/處理中途去設定視窗切換了開關），所以另外讀 `cfg`；`Recording` 時 overlay
+/// 配色用 `session_mode`（這次錄音鎖定的模式，不受之後設定變更影響）。
+fn set_state(app: &AppHandle, state: AppState, session_mode: OutputMode, cfg: &Arc<Mutex<Config>>) {
     match state {
-        AppState::Recording => overlay::show(app, mode == OutputMode::Translate),
-        AppState::Processing | AppState::Idle => overlay::hide(app),
+        AppState::Idle => {
+            let c = cfg.lock().unwrap();
+            tray::set_idle_tooltip(app, c.translate_mode_active, &c.target_language);
+            overlay::hide(app);
+        }
+        AppState::Recording => {
+            tray::set_state(app, state);
+            overlay::show(app, session_mode == OutputMode::Translate);
+        }
+        AppState::Processing => {
+            tray::set_state(app, state);
+            overlay::hide(app);
+        }
     }
 }
 
