@@ -71,3 +71,35 @@ button:hover {
 .hidden {
   display: none;
 }
+
+.badge {
+  display: inline-block;
+  background: #3b5bdb;
+  color: white;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-left: 6px;
+}
+
+.toggle-source {
+  display: block;
+  margin-top: 6px;
+  background: none;
+  border: none;
+  color: #7c8bff;
+  font-size: 11px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.toggle-source:hover {
+  text-decoration: underline;
+}
+
+.source {
+  display: block;
+  margin-top: 4px;
+  color: #9a9da3;
+  font-style: italic;
+}

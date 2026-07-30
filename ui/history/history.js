@@ -20,6 +20,13 @@ function render(entries) {
     const ts = document.createElement("span");
     ts.className = "timestamp";
     ts.textContent = formatTimestamp(entry.timestamp);
+    if (entry.translated) {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = `翻譯 → ${entry.target_language}`;
+      ts.appendChild(document.createTextNode(" "));
+      ts.appendChild(badge);
+    }
 
     const text = document.createElement("span");
     text.className = "text";
@@ -27,6 +34,24 @@ function render(entries) {
 
     li.appendChild(ts);
     li.appendChild(text);
+
+    if (entry.translated && entry.source_text) {
+      const source = document.createElement("span");
+      source.className = "text source hidden";
+      source.textContent = entry.source_text;
+
+      const toggle = document.createElement("button");
+      toggle.className = "toggle-source";
+      toggle.textContent = "顯示原文";
+      toggle.addEventListener("click", () => {
+        const hidden = source.classList.toggle("hidden");
+        toggle.textContent = hidden ? "顯示原文" : "隱藏原文";
+      });
+
+      li.appendChild(toggle);
+      li.appendChild(source);
+    }
+
     listEl.appendChild(li);
   }
 }
