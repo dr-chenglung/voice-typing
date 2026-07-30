@@ -11,6 +11,10 @@ pub fn parse_key(s: &str) -> Option<Key> {
     match norm.as_str() {
         "right_alt" | "alt_right" | "altgr" | "ralt" => Some(Key::AltGr),
         "right_ctrl" | "ctrl_right" | "right_control" | "rctrl" => Some(Key::ControlRight),
+        "right_shift" | "shift_right" | "rshift" => Some(Key::ShiftRight),
+        "scroll_lock" | "scrolllock" => Some(Key::ScrollLock),
+        "pause" | "pause_break" => Some(Key::Pause),
+        "insert" | "ins" => Some(Key::Insert),
         _ => None,
     }
 }
@@ -32,5 +36,50 @@ pub fn run(target: Key, tx: Sender<()>) {
     };
     if let Err(e) = listen(callback) {
         eprintln!("[hotkey] rdev listen 失敗: {:?}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_right_alt_aliases() {
+        assert_eq!(parse_key("right_alt"), Some(Key::AltGr));
+        assert_eq!(parse_key("Right-Alt"), Some(Key::AltGr));
+        assert_eq!(parse_key("altgr"), Some(Key::AltGr));
+    }
+
+    #[test]
+    fn parses_right_ctrl_aliases() {
+        assert_eq!(parse_key("right_ctrl"), Some(Key::ControlRight));
+    }
+
+    #[test]
+    fn parses_right_shift() {
+        assert_eq!(parse_key("right_shift"), Some(Key::ShiftRight));
+        assert_eq!(parse_key("rshift"), Some(Key::ShiftRight));
+    }
+
+    #[test]
+    fn parses_scroll_lock() {
+        assert_eq!(parse_key("scroll_lock"), Some(Key::ScrollLock));
+        assert_eq!(parse_key("scrolllock"), Some(Key::ScrollLock));
+    }
+
+    #[test]
+    fn parses_pause() {
+        assert_eq!(parse_key("pause"), Some(Key::Pause));
+    }
+
+    #[test]
+    fn parses_insert() {
+        assert_eq!(parse_key("insert"), Some(Key::Insert));
+        assert_eq!(parse_key("ins"), Some(Key::Insert));
+    }
+
+    #[test]
+    fn rejects_unknown_key() {
+        assert_eq!(parse_key("caps_lock"), None);
     }
 }
