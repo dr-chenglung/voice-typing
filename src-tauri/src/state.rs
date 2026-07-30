@@ -11,3 +11,11 @@ pub enum AppState {
     Recording,
     Processing,
 }
+
+/// 錄音本次的輸出模式：由「開始錄音時按的是哪顆熱鍵」決定，全程不變（規格 3.1）。
+/// 不衍生 Serialize：僅用於後端 channel 傳遞與比較，不會直接送到前端。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputMode {
+    Direct,
+    Translate,
+}
