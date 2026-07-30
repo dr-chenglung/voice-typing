@@ -13,6 +13,7 @@ const EASE = 0.3;
 
 const QUIET = [233, 233, 239]; // 安靜：亮灰
 const LOUD = [255, 159, 28]; // 大聲：活力橙
+const LOUD_TRANSLATE = [139, 140, 255]; // 翻譯模式：藍紫，與一般模式的活力橙區隔
 
 const mic = document.getElementById("mic");
 // 直接對每個 <path> 設 fill，避免依賴 <svg> 根元素的 fill 繼承。
@@ -25,22 +26,25 @@ let displayed = 0;
 let floor = 0.003; // 背景噪音底（慢速追蹤）
 let ceil = 0.03; // 近期峰值（快速追上、緩慢下降）
 let seeded = false; // 每次開始錄音時，用第一筆音量重新定標，避免起始瞬間爆滿
+let translateMode = false; // 本次顯示是否為翻譯模式，由 overlay-show 事件帶入
 
 function lerp(a, b, t) {
   return Math.round(a + (b - a) * t);
 }
 
-// 把目前（已平滑的）音量 t∈[0,1] 套用到 SVG：顏色（亮灰→活力橙）、發光、輕微放大。
+// 把目前（已平滑的）音量 t∈[0,1] 套用到 SVG：顏色（亮灰→活力橙或藍紫）、發光、輕微放大。
 function apply() {
   const t = displayed;
-  const color = `rgb(${lerp(QUIET[0], LOUD[0], t)}, ${lerp(QUIET[1], LOUD[1], t)}, ${lerp(
+  const loud = translateMode ? LOUD_TRANSLATE : LOUD;
+  const color = `rgb(${lerp(QUIET[0], loud[0], t)}, ${lerp(QUIET[1], loud[1], t)}, ${lerp(
     QUIET[2],
-    LOUD[2],
+    loud[2],
     t
   )})`;
   for (const p of paths) p.style.fill = color;
-  // 發光隨音量增強：橙色 glow 疊加固定的黑色陰影，維持在深色底盤上的可讀性。
-  mic.style.filter = `drop-shadow(0 0 ${2 + t * 10}px rgba(255, 159, 28, ${t * 0.9})) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))`;
+  // 發光隨音量增強：glow 顏色隨模式切換（橙色或藍紫）疊加固定的黑色陰影，維持在深色底盤上的可讀性。
+  const glow = translateMode ? "139, 140, 255" : "255, 159, 28";
+  mic.style.filter = `drop-shadow(0 0 ${2 + t * 10}px rgba(${glow}, ${t * 0.9})) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))`;
   mic.style.transform = `scale(${1 + t * 0.12})`;
 }
 
@@ -73,10 +77,11 @@ function pushLevel(raw) {
   target = norm < DEAD ? 0 : (norm - DEAD) / (1 - DEAD);
 }
 
-function reset() {
+function reset(translate) {
   target = 0;
   displayed = 0;
   seeded = false; // 下次講話重新自動定標
+  translateMode = Boolean(translate);
 }
 
 apply();
@@ -84,4 +89,4 @@ requestAnimationFrame(tick);
 
 const { event } = window.__TAURI__;
 event.listen("level", (e) => pushLevel(e.payload));
-event.listen("overlay-show", () => reset());
+event.listen("overlay-show", (e) => reset(e.payload?.translate));
