@@ -94,7 +94,8 @@ pub fn run(
 fn set_state(app: &AppHandle, state: AppState) {
     tray::set_state(app, state);
     match state {
-        AppState::Recording => overlay::show(app),
+        // 目前一律傳 false（非翻譯模式）；真實模式由 Task 8 的 set_state(mode) 重構接上。
+        AppState::Recording => overlay::show(app, false),
         AppState::Processing | AppState::Idle => overlay::hide(app),
     }
 }

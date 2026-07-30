@@ -25,6 +25,12 @@ const TICK: Duration = Duration::from_millis(33); // ~30fps，與舊版 FRAME �
 /// 標記疊加視窗目前是否可見，供音量推播背景執行緒節流用。
 struct OverlayVisible(Arc<AtomicBool>);
 
+/// overlay-show 事件的 payload：標記是否進入翻譯模式。
+#[derive(serde::Serialize, Clone)]
+struct OverlayShowPayload {
+    translate: bool,
+}
+
 /// 在 setup 階段建立隱藏的疊加視窗，並啟動音量推播背景執行緒。
 /// `level` 由音訊執行緒寫入即時音量（f32 bits），與舊版相同。
 pub fn create_window(app: &AppHandle, level: Arc<AtomicU32>) -> tauri::Result<()> {
@@ -67,7 +73,8 @@ pub fn create_window(app: &AppHandle, level: Arc<AtomicU32>) -> tauri::Result<()
 }
 
 /// 顯示疊加視窗：定位到螢幕底部置中、通知前端重置波形、以不奪焦點方式顯示。
-pub fn show(app: &AppHandle) {
+/// `translate` 為 true 時前端會把麥克風圖示改成翻譯模式的配色（見 ui/overlay/overlay.js）。
+pub fn show(app: &AppHandle, translate: bool) {
     let Some(window) = app.get_webview_window("overlay") else {
         return;
     };
@@ -79,7 +86,7 @@ pub fn show(app: &AppHandle) {
             let _ = window.set_position(PhysicalPosition::new(x, y));
         }
     }
-    let _ = window.emit_to("overlay", "overlay-show", ());
+    let _ = window.emit_to("overlay", "overlay-show", OverlayShowPayload { translate });
     let _ = window.show();
     if let Some(flag) = app.try_state::<OverlayVisible>() {
         flag.0.store(true, Ordering::Relaxed);
