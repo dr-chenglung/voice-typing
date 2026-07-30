@@ -25,6 +25,9 @@ pub struct ConfigView {
 
     pub vocabulary: String,
     pub enable_formatting: bool,
+
+    pub target_language: String,
+    pub translate_hotkey: String,
 }
 
 #[derive(Deserialize)]
@@ -44,6 +47,11 @@ pub struct ConfigUpdate {
 
     pub vocabulary: String,
     pub enable_formatting: bool,
+
+    #[serde(default)]
+    pub target_language: String,
+    #[serde(default)]
+    pub translate_hotkey: String,
 }
 
 #[tauri::command]
@@ -60,6 +68,23 @@ pub fn get_config(cfg: State<'_, Arc<Mutex<Config>>>) -> ConfigView {
         hotkey: c.hotkey.clone(),
         vocabulary: c.vocabulary.clone(),
         enable_formatting: c.enable_formatting,
+        target_language: c.target_language.clone(),
+        translate_hotkey: c.translate_hotkey.clone(),
+    }
+}
+
+/// 驗證翻譯熱鍵設定：非空時必須能解析、且不可與主熱鍵解析後是同一顆鍵。
+fn validate_translate_hotkey(hotkey: &str, translate_hotkey: &str) -> Result<(), String> {
+    let translate = translate_hotkey.trim();
+    if translate.is_empty() {
+        return Ok(());
+    }
+    let Some(t_key) = crate::hotkey::parse_key(translate) else {
+        return Err(format!("無法辨識的翻譯熱鍵設定: {translate:?}"));
+    };
+    match crate::hotkey::parse_key(hotkey.trim()) {
+        Some(m_key) if m_key == t_key => Err("翻譯熱鍵不可與主熱鍵相同".to_string()),
+        _ => Ok(()),
     }
 }
 
@@ -69,6 +94,7 @@ pub fn save_config(
     cfg: State<'_, Arc<Mutex<Config>>>,
     update: ConfigUpdate,
 ) -> Result<(), String> {
+    validate_translate_hotkey(&update.hotkey, &update.translate_hotkey)?;
     let snapshot = {
         let mut c = cfg.lock().unwrap();
         if !update.stt_api_key.trim().is_empty() {
@@ -85,6 +111,8 @@ pub fn save_config(
         c.hotkey = update.hotkey;
         c.vocabulary = update.vocabulary;
         c.enable_formatting = update.enable_formatting;
+        c.target_language = update.target_language;
+        c.translate_hotkey = update.translate_hotkey;
         c.clone()
     };
     snapshot.save(&app).map_err(|e| e.to_string())
@@ -100,4 +128,34 @@ pub fn clear_history(app: AppHandle) -> Result<(), String> {
     history::clear(&app).map_err(|e| e.to_string())?;
     let _ = app.emit_to("history", "history-cleared", ());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allows_empty_translate_hotkey() {
+        assert!(validate_translate_hotkey("right_alt", "").is_ok());
+    }
+
+    #[test]
+    fn rejects_same_as_main() {
+        assert!(validate_translate_hotkey("right_alt", "right_alt").is_err());
+    }
+
+    #[test]
+    fn rejects_same_key_via_alias() {
+        assert!(validate_translate_hotkey("right_alt", "alt_right").is_err());
+    }
+
+    #[test]
+    fn rejects_unparseable() {
+        assert!(validate_translate_hotkey("right_alt", "caps_lock").is_err());
+    }
+
+    #[test]
+    fn accepts_distinct_valid_keys() {
+        assert!(validate_translate_hotkey("right_alt", "right_ctrl").is_ok());
+    }
 }
