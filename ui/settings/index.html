@@ -69,9 +69,6 @@
     <select id="hotkey">
       <option value="right_alt">右 Alt（預設）</option>
       <option value="right_ctrl">右 Ctrl</option>
-      <option value="scroll_lock">Scroll Lock</option>
-      <option value="pause">Pause</option>
-      <option value="insert">Insert</option>
     </select>
   </label>
   <p class="hint">變更熱鍵後需要重新啟動程式才會生效。</p>
@@ -96,18 +93,11 @@
       <input type="text" id="target_language_custom" placeholder="French" required />
     </label>
 
-    <label>
-      翻譯熱鍵
-      <select id="translate_hotkey">
-        <option value="">不啟用</option>
-        <option value="right_alt">右 Alt</option>
-        <option value="right_ctrl">右 Ctrl（預設）</option>
-        <option value="scroll_lock">Scroll Lock</option>
-        <option value="pause">Pause</option>
-        <option value="insert">Insert</option>
-      </select>
+    <label class="checkbox">
+      <input type="checkbox" id="translate_mode_active" />
+      啟用翻譯模式（下次用熱鍵錄音會直接翻譯成上面的目標語言，而非一般校正）
     </label>
-    <p class="hint">錄音由此鍵開始＝這次輸出會翻譯成上方目標語言；不可與上方「熱鍵」設定相同，變更後需重啟程式才會生效。</p>
+    <p class="hint">存檔立即生效，不需要重啟程式；下一次按熱鍵錄音就會套用。</p>
   </fieldset>
 
   <div class="actions">

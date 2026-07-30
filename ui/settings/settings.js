@@ -20,7 +20,7 @@ const hotkeySelect = document.getElementById("hotkey");
 const targetLanguageSelect = document.getElementById("target_language_select");
 const targetLanguageCustomRow = document.getElementById("target_language_custom_row");
 const targetLanguageCustomInput = document.getElementById("target_language_custom");
-const translateHotkeySelect = document.getElementById("translate_hotkey");
+const translateModeActiveInput = document.getElementById("translate_mode_active");
 const statusEl = document.getElementById("status");
 
 const PRESET_LANGUAGES = [
@@ -49,7 +49,6 @@ function resolvedTargetLanguage() {
 targetLanguageSelect.addEventListener("change", syncTargetLanguageCustomRow);
 
 let originalHotkey = "";
-let originalTranslateHotkey = "";
 
 async function load() {
   const cfg = await core.invoke("get_config");
@@ -74,10 +73,9 @@ async function load() {
     targetLanguageCustomInput.value = cfg.target_language;
   }
   syncTargetLanguageCustomRow();
-  translateHotkeySelect.value = cfg.translate_hotkey;
+  translateModeActiveInput.checked = cfg.translate_mode_active;
   hotkeySelect.value = cfg.hotkey;
   originalHotkey = cfg.hotkey;
-  originalTranslateHotkey = cfg.translate_hotkey;
 }
 
 form.addEventListener("submit", async (ev) => {
@@ -97,14 +95,12 @@ form.addEventListener("submit", async (ev) => {
         enable_correction: enableCorrectionInput.checked,
         hotkey: hotkeySelect.value,
         target_language: resolvedTargetLanguage(),
-        translate_hotkey: translateHotkeySelect.value,
+        translate_mode_active: translateModeActiveInput.checked,
       },
     });
     sttApiKeyInput.value = "";
     llmApiKeyInput.value = "";
-    const hotkeyChanged =
-      hotkeySelect.value !== originalHotkey ||
-      translateHotkeySelect.value !== originalTranslateHotkey;
+    const hotkeyChanged = hotkeySelect.value !== originalHotkey;
     const restartNote = hotkeyChanged ? "（熱鍵已變更，需重啟程式才生效）" : "";
     statusEl.textContent = `已儲存 ${restartNote}`;
     await load();
