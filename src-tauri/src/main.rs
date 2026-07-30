@@ -69,7 +69,7 @@ fn main() {
                 panic!(
                     "{}",
                     anyhow!(
-                        "無法辨識的熱鍵設定: {:?}（可用 right_alt / right_ctrl / right_shift / scroll_lock / pause / insert 等）",
+                        "無法辨識的熱鍵設定: {:?}（可用 right_alt / right_ctrl / scroll_lock / pause / insert 等）",
                         cfg.hotkey
                     )
                 )

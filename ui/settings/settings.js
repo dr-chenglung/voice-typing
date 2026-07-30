@@ -49,6 +49,7 @@ function resolvedTargetLanguage() {
 targetLanguageSelect.addEventListener("change", syncTargetLanguageCustomRow);
 
 let originalHotkey = "";
+let originalTranslateHotkey = "";
 
 async function load() {
   const cfg = await core.invoke("get_config");
@@ -76,6 +77,7 @@ async function load() {
   translateHotkeySelect.value = cfg.translate_hotkey;
   hotkeySelect.value = cfg.hotkey;
   originalHotkey = cfg.hotkey;
+  originalTranslateHotkey = cfg.translate_hotkey;
 }
 
 form.addEventListener("submit", async (ev) => {
@@ -100,8 +102,10 @@ form.addEventListener("submit", async (ev) => {
     });
     sttApiKeyInput.value = "";
     llmApiKeyInput.value = "";
-    const restartNote =
-      hotkeySelect.value !== originalHotkey ? "（熱鍵已變更，需重啟程式才生效）" : "";
+    const hotkeyChanged =
+      hotkeySelect.value !== originalHotkey ||
+      translateHotkeySelect.value !== originalTranslateHotkey;
+    const restartNote = hotkeyChanged ? "（熱鍵已變更，需重啟程式才生效）" : "";
     statusEl.textContent = `已儲存 ${restartNote}`;
     await load();
   } catch (err) {

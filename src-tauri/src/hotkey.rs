@@ -1,6 +1,10 @@
 //! 熱鍵監聽（規格第 3.1 節）。
-//! 在獨立執行緒以 rdev::listen 監聽鍵盤，偵測目標鍵（預設右 Alt）的「按下」transition，
-//! 每次按下送出一個 toggle 訊號。按住自動重複的 KeyPress 會被 `down` 旗標濾掉。
+//! 在獨立執行緒以 rdev::listen 監聽鍵盤，同時偵測主熱鍵（預設右 Alt）與可選的翻譯熱鍵的
+//! 「按下」transition，各自按下送出對應的 `OutputMode`。每顆鍵各自有獨立的 down 旗標，
+//! 濾掉按住自動重複的 KeyPress（見 `run()`）。
+//!
+//! 可用鍵（見 `parse_key`）：right_alt／right_ctrl／scroll_lock／pause／insert，共 5 種。
+//! 注意：right_shift 刻意不提供——持續右 Shift 打大寫字母是常見操作，會與正常打字衝突。
 
 use crate::state::OutputMode;
 use rdev::{listen, Event, EventType, Key};
@@ -12,7 +16,6 @@ pub fn parse_key(s: &str) -> Option<Key> {
     match norm.as_str() {
         "right_alt" | "alt_right" | "altgr" | "ralt" => Some(Key::AltGr),
         "right_ctrl" | "ctrl_right" | "right_control" | "rctrl" => Some(Key::ControlRight),
-        "right_shift" | "shift_right" | "rshift" => Some(Key::ShiftRight),
         "scroll_lock" | "scrolllock" => Some(Key::ScrollLock),
         "pause" | "pause_break" => Some(Key::Pause),
         "insert" | "ins" => Some(Key::Insert),
@@ -66,12 +69,6 @@ mod tests {
     #[test]
     fn parses_right_ctrl_aliases() {
         assert_eq!(parse_key("right_ctrl"), Some(Key::ControlRight));
-    }
-
-    #[test]
-    fn parses_right_shift() {
-        assert_eq!(parse_key("right_shift"), Some(Key::ShiftRight));
-        assert_eq!(parse_key("rshift"), Some(Key::ShiftRight));
     }
 
     #[test]

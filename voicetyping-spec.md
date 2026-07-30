@@ -68,7 +68,7 @@
   - 第二次觸發 → 停止錄音並進入轉錄流程
 - 用一個狀態變數 `AppState { Idle, Recording, Processing }` 控制。
 - **只需偵測「按下」事件**，不需處理放開事件。
-- 熱鍵由 `config.toml` 的 `hotkey` 欄位決定，預設 `"right_alt"`；使用者透過**設定視窗**即可改為 `"right_ctrl"`（`rdev` 回報 `Key::ControlRight`）等其他鍵，存檔後寫回 `config.toml`（變更需重啟程式才生效）。可選鍵共 6 種：`right_alt`／`right_ctrl`／`right_shift`／`scroll_lock`／`pause`／`insert`（見 `hotkey::parse_key`）。
+- 熱鍵由 `config.toml` 的 `hotkey` 欄位決定，預設 `"right_alt"`；使用者透過**設定視窗**即可改為 `"right_ctrl"`（`rdev` 回報 `Key::ControlRight`）等其他鍵，存檔後寫回 `config.toml`（變更需重啟程式才生效）。可選鍵共 5 種：`right_alt`／`right_ctrl`／`scroll_lock`／`pause`／`insert`（見 `hotkey::parse_key`）。刻意不提供 `right_shift`：持續按右 Shift 打大寫字母是常見操作，會與正常打字衝突。
 - **翻譯輸出額外提供第二支熱鍵**：`config.toml` 的 `translate_hotkey` 欄位（預設 `"right_ctrl"`，留空字串＝停用），與主熱鍵各自獨立 toggle；本次輸出翻譯成的目標語言由 `target_language` 欄位決定（預設 `"English"`）。雙熱鍵的模式判定規則與容錯見 §3.1a；翻譯輸出本身的行為見 §5.4。
 
 ### 3.1a 雙熱鍵與翻譯模式判定
@@ -247,10 +247,10 @@ enable_correction = true          # 可關閉校正，只輸出原始辨識
 hotkey       = "right_alt"        # 觸發鍵，可改 "right_ctrl" 等
 
 vocabulary        = ""            # 個人詞彙表，逗號或換行分隔；空＝不啟用，同時用於 STT prompt 與校正
-enable_formatting = false         # 智慧排版（opt-in）：長內容分段/條列並輕度濃縮；需 enable_correction 開啟才生效
+enable_formatting = false         # 智慧排版（opt-in）：長內容分段/條列並輕度濃縮；一般校正路徑（Direct）需 enable_correction 開啟才生效，翻譯路徑（Translate）則獨立生效、不受 enable_correction 影響
 
 target_language  = "English"      # 翻譯目標語言（英文語言名稱，如 English/Japanese），只在按翻譯熱鍵時生效
-translate_hotkey = "right_ctrl"   # 翻譯專用熱鍵，可改 right_shift 等；留空字串＝停用；不可與 hotkey 設為同一顆鍵
+translate_hotkey = "right_ctrl"   # 翻譯專用熱鍵，可改 scroll_lock 等；留空字串＝停用；不可與 hotkey 設為同一顆鍵
 ```
 
 > 語言一律自動偵測（無 `language` 欄位）：STT 不送 `language`，忠實轉錄原語言。
@@ -320,7 +320,7 @@ translate_hotkey = "right_ctrl"   # 翻譯專用熱鍵，可改 right_shift 等�
 16. **移除 API key 環境變數 fallback、修正校正 prompt 洩漏定界符**（2026-07-01，使用者主動要求）：`GROQ_API_KEY`/`.env`/`dotenvy` 整條路徑移除，API key 一律只能在設定視窗填入，錯誤訊息不再提及環境變數；同時修正校正用的 `SYSTEM_PROMPT` 與 user message，明確禁止把 `[逐字稿開始]`/`[逐字稿結束]` 這兩個分隔符號本身輸出出來（先前部分模型會把定界符也一起回傳）。（`config.rs`、`transcribe.rs`、`main.rs`、`Cargo.toml`）
 17. **STT 回應改用 `response_format=json` 並解析 `text` 欄位**（2026-07-01，使用者回報）：使用者換 STT 供應商後發現整包 JSON（含 `segments`/`usage`）被當成逐字稿。原本寫死 `response_format=text` 假設回應是純字串，但 `text` 非 Groq 預設值（預設是 `json`）且部分供應商不理會。改為送 `json` 並解析 `{"text": ...}`；容錯：JSON 物件缺 `text` 視為失敗、非 JSON 退回純文字。（`transcribe.rs`）
 18. **移除語言設定欄位，STT 一律自動偵測**（2026-07-01，使用者要求）：設定視窗的「語言」欄位與 `config.toml` 的 `language` 欄位整條移除（前端 UI → IPC → Config → STT 呼叫），STT 一律不送 `language` 參數、忠實轉錄原語言；同時放棄「指定 zh 時送繁體 prompt」，繁體轉換改全靠 LLM 校正。（`config.rs`、`commands.rs`、`transcribe.rs`、`controller.rs`、`ui/settings/`）
-19. **翻譯輸出（雙熱鍵，2026-07-30，使用者主動要求並已實作）**：新增可獨立設定的第二支翻譯熱鍵（`translate_hotkey`）與目標語言設定（`target_language`）；本次錄音開始時按的是哪顆鍵決定輸出走一般校正或翻譯（`OutputMode`）。翻譯使用獨立的 `TRANSLATE_SYSTEM_PROMPT_TEMPLATE`，一次 LLM 呼叫同時完成清理與翻譯，不受 `enable_correction` 影響，降級規則比照校正；overlay 疊加視窗翻譯模式改用藍紫色發光（一般模式維持活力橙）；歷史紀錄新增 `translated`/`target_language`/`source_text` 欄位並相容舊版無此欄位的 `history.json`；主熱鍵與翻譯熱鍵的可選項由 2 種擴充為 6 種；翻譯熱鍵不可與主熱鍵相同，衝突時存檔會擋下、既有設定衝突則於啟動時停用並通知。（`config.rs`、`state.rs`、`hotkey.rs`、`transcribe.rs`、`controller.rs`、`commands.rs`、`overlay.rs`、`history.rs`、`main.rs`、`ui/settings/`、`ui/history/`、`ui/overlay/`）
+19. **翻譯輸出（雙熱鍵，2026-07-30，使用者主動要求並已實作）**：新增可獨立設定的第二支翻譯熱鍵（`translate_hotkey`）與目標語言設定（`target_language`）；本次錄音開始時按的是哪顆鍵決定輸出走一般校正或翻譯（`OutputMode`）。翻譯使用獨立的 `TRANSLATE_SYSTEM_PROMPT_TEMPLATE`，一次 LLM 呼叫同時完成清理與翻譯，不受 `enable_correction` 影響，降級規則比照校正；overlay 疊加視窗翻譯模式改用藍紫色發光（一般模式維持活力橙）；歷史紀錄新增 `translated`/`target_language`/`source_text` 欄位並相容舊版無此欄位的 `history.json`；主熱鍵與翻譯熱鍵的可選項由 2 種擴充為 5 種（不含 `right_shift`：持續按右 Shift 打大寫字母會與正常打字衝突，故不提供）；翻譯熱鍵不可與主熱鍵相同，衝突時存檔會擋下、既有設定衝突則於啟動時停用並通知。（`config.rs`、`state.rs`、`hotkey.rs`、`transcribe.rs`、`controller.rs`、`commands.rs`、`overlay.rs`、`history.rs`、`main.rs`、`ui/settings/`、`ui/history/`、`ui/overlay/`）
 
 ### 模組對照
 
