@@ -26,7 +26,6 @@ mod typer;
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
-use anyhow::anyhow;
 use tauri::Manager;
 
 /// 全 app 共用的 WebView2/Chromium 啟動參數，**所有視窗都必須套用同一組**。
@@ -65,13 +64,16 @@ fn main() {
             // 設定檔讀取需要 app_config_dir()，只能在 setup 階段（已有 AppHandle）才做。
             let cfg = config::Config::load(&handle).expect("載入設定失敗");
             let hotkey = hotkey::parse_key(&cfg.hotkey).unwrap_or_else(|| {
-                panic!(
-                    "{}",
-                    anyhow!(
-                        "無法辨識的熱鍵設定: {:?}（可用 right_alt / right_ctrl）",
-                        cfg.hotkey
-                    )
-                )
+                // 降級而非 panic：舊版設定視窗曾短暫提供過的熱鍵選項（如 scroll_lock）
+                // 若殘留在 config.toml，不能讓 release 版（隱藏 console）直接啟動失敗、
+                // 使用者卻連設定視窗都打不開去修正。
+                let msg = format!(
+                    "無法辨識的熱鍵設定 {:?}，已回復為預設的右 Alt，請到設定視窗重新選擇",
+                    cfg.hotkey
+                );
+                eprintln!("[config] {msg}");
+                notify::show(&handle, "熱鍵設定已重設", &msg);
+                rdev::Key::AltGr
             });
 
             println!("================ 語音免打字工具 ================");

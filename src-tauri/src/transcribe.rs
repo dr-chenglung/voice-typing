@@ -415,7 +415,7 @@ pub async fn correct(
 
 /// 翻譯輸出。失敗時由呼叫端降級為輸出原始文字（比照 `correct()` 的降級規則，見 controller）。
 ///
-/// 不受 `enable_correction` 影響——呼叫此函式即代表使用者透過翻譯熱鍵明確要求翻譯。
+/// 不受 `enable_correction` 影響——呼叫此函式即代表使用者已開啟翻譯模式（`translate_mode_active`），明確要求翻譯。
 /// `target_language` 為英文語言名稱（如 "English"／"Traditional Chinese"），與 `BASE_SYSTEM_PROMPT`
 /// 完全獨立的提示詞負責處理翻譯（見 `TRANSLATE_SYSTEM_PROMPT_TEMPLATE`）。
 pub async fn translate(

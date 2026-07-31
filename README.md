@@ -82,7 +82,7 @@ cargo tauri build          # 產出 release 安裝包（NSIS）與獨立 exe
 | `transcribe.rs` | Groq STT 與 LLM 校正／翻譯 |
 | `controller.rs` | 狀態機協調、管線（一般校正／翻譯二選一）、容錯降級 |
 | `typer.rs` | 剪貼簿貼上輸出（Ctrl+V，繞過中文輸入法組字；失敗時退回 enigo 打字） |
-| `tray.rs` | 系統列圖示、狀態顯示、選單（設定／歷史紀錄／結束） |
+| `tray.rs` | 系統列圖示、狀態顯示、選單（設定／歷史紀錄／結束）；閒置 tooltip 附加目前模式 |
 | `overlay.rs` | 麥克風圖示疊加視窗的生命週期管理（顯示／隱藏／定位／NOACTIVATE／一般或翻譯配色） |
 | `history.rs` | 轉錄文字歷史紀錄讀寫（`app_data_dir()/history.json`，含翻譯關聯欄位） |
 | `notify.rs` | 背景執行緒失敗時發 Windows 系統通知 |

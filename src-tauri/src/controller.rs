@@ -126,8 +126,13 @@ pub fn run(rx: Receiver<()>, app: AppHandle, cfg: Arc<Mutex<Config>>, level: Arc
 fn set_state(app: &AppHandle, state: AppState, session_mode: OutputMode, cfg: &Arc<Mutex<Config>>) {
     match state {
         AppState::Idle => {
-            let c = cfg.lock().unwrap();
-            tray::set_idle_tooltip(app, c.translate_mode_active, &c.target_language);
+            // 複製出需要的值再放掉鎖：tray API 會阻塞等主執行緒，若持鎖呼叫，
+            // 跟主執行緒上 save_config/get_config 的鎖會互相卡死。
+            let (translate_mode_active, target_language) = {
+                let c = cfg.lock().unwrap();
+                (c.translate_mode_active, c.target_language.clone())
+            };
+            tray::set_idle_tooltip(app, translate_mode_active, &target_language);
             overlay::hide(app);
         }
         AppState::Recording => {
