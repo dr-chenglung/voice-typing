@@ -6,7 +6,9 @@
 >
 > **2026-07-01 更新**：STT 與 LLM 校正原本「共用一支 GROQ_API_KEY、端點寫死 Groq」的規則，改為**兩者可在設定視窗各自獨立設定 API URL／API Key／模型**（使用者主動要求，不再綁死單一供應商）。預設值仍為 Groq 對應端點；只要供應商提供 OpenAI 相容的 `audio/transcriptions`／`chat/completions` 端點即可切換使用。詳見 §5、§7。
 >
-> **2026-07-30 更新**：新增**翻譯輸出**功能（使用者主動要求）：第二支可獨立設定的翻譯熱鍵（`translate_hotkey`，預設右 Ctrl），錄音開始時按此鍵，本次輸出改為翻譯成 `target_language` 指定的目標語言（預設英文）；一般熱鍵行為完全不變，仍**絕不翻譯**、忠實轉錄原語言。詳見 §3.1a、§5.4、§7。
+> **2026-07-30 更新**：新增**翻譯輸出**功能（使用者主動要求）：可選擇讓某次錄音的輸出改為翻譯成 `target_language` 指定的目標語言（預設英文），而非只做輕度校正；一般模式行為完全不變，仍**絕不翻譯**、忠實轉錄原語言。詳見 §3.1、§5.4、§7。
+>
+> **2026-07-31 更新**：翻譯輸出的模式判定機制簡化（使用者主動要求回退）：原本 2026-07-30 版本用「第二支翻譯熱鍵」判定模式，改為**單一熱鍵維持不變＋設定視窗開關** `translate_mode_active`（預設關閉）；開啟時，下一次用熱鍵開始的錄音即翻譯，開始錄音當下讀取設定、不需重啟程式。熱鍵可選項因此由 5 種縮回原本的 2 種（右 Alt／右 Ctrl）。詳見 §3.1、§5.4、§7。
 
 ---
 
@@ -68,17 +70,8 @@
   - 第二次觸發 → 停止錄音並進入轉錄流程
 - 用一個狀態變數 `AppState { Idle, Recording, Processing }` 控制。
 - **只需偵測「按下」事件**，不需處理放開事件。
-- 熱鍵由 `config.toml` 的 `hotkey` 欄位決定，預設 `"right_alt"`；使用者透過**設定視窗**即可改為 `"right_ctrl"`（`rdev` 回報 `Key::ControlRight`）等其他鍵，存檔後寫回 `config.toml`（變更需重啟程式才生效）。可選鍵共 5 種：`right_alt`／`right_ctrl`／`scroll_lock`／`pause`／`insert`（見 `hotkey::parse_key`）。刻意不提供 `right_shift`：持續按右 Shift 打大寫字母是常見操作，會與正常打字衝突。
-- **翻譯輸出額外提供第二支熱鍵**：`config.toml` 的 `translate_hotkey` 欄位（預設 `"right_ctrl"`，留空字串＝停用），與主熱鍵各自獨立 toggle；本次輸出翻譯成的目標語言由 `target_language` 欄位決定（預設 `"English"`）。雙熱鍵的模式判定規則與容錯見 §3.1a；翻譯輸出本身的行為見 §5.4。
-
-### 3.1a 雙熱鍵與翻譯模式判定
-
-- 主熱鍵（`hotkey`）與翻譯熱鍵（`translate_hotkey`）在同一個 `rdev::listen` 迴圈裡各自監聽、各自 toggle，互不影響對方的按下/放開狀態（`hotkey.rs::run` 同時追蹤 `main_down`／`translate_down` 兩個旗標）。
-- **本次輸出走一般校正或翻譯，由「開始錄音當下按的是哪顆鍵」決定，全程不變**：`Idle` 狀態收到主熱鍵訊號 → 以一般模式開始錄音；收到翻譯熱鍵訊號 → 以翻譯模式開始錄音（`OutputMode::Direct`/`Translate`，錄音期間存於 `controller.rs` 的區域變數 `session_mode`）。
-- **錄音中，任一顆熱鍵都能停止**：`Recording` 狀態下無論收到主熱鍵或翻譯熱鍵訊號，都會停止錄音並進入 `Processing`；輸出走哪個分支仍依開始錄音時記下的 `session_mode`，不受停止鍵是哪一顆影響。
-- `Processing` 期間忽略任何熱鍵訊號（沿用既有規則，避免處理中重複觸發）。
-- 翻譯熱鍵可設為空字串停用；停用時 `hotkey::run` 只監聽主熱鍵，行為與翻譯功能加入前完全相同，overlay 疊加視窗恆為一般模式配色。
-- **翻譯熱鍵不可與主熱鍵設為同一顆鍵**（含別名互指同一顆實體鍵，如 `right_alt`/`alt_right` 都是 `Key::AltGr`）：設定視窗存檔時（`commands::validate_translate_hotkey`）與程式啟動讀取設定時（`config::Config::resolved_translate_key`）皆會驗證。存檔時衝突會擋下存檔並提示；啟動時若既有設定檔恰好衝突（例如手改設定檔），會停用翻譯熱鍵、跳一則系統通知說明原因，程式仍正常啟動，不會崩潰。
+- 熱鍵由 `config.toml` 的 `hotkey` 欄位決定，預設 `"right_alt"`；使用者透過**設定視窗**即可改為 `"right_ctrl"`（`rdev` 回報 `Key::ControlRight`）等其他鍵，存檔後寫回 `config.toml`（變更需重啟程式才生效）。可選鍵共 2 種：`right_alt`／`right_ctrl`（見 `hotkey::parse_key`）。刻意不提供 `right_shift`：持續按右 Shift 打大寫字母是常見操作，會與正常打字衝突。
+- **翻譯輸出不需額外的熱鍵**：是否翻譯由 `config.toml` 的 `translate_mode_active` 欄位決定（預設 `false`，設定視窗提供「啟用翻譯模式」勾選框），開始錄音的當下讀取這個設定值，決定本次輸出走一般校正或翻譯（`OutputMode::Direct`/`Translate`，見 `state.rs`），**不需重啟程式**——這點與 `hotkey` 欄位本身不同，改熱鍵仍需重啟。翻譯輸出翻成的目標語言由 `target_language` 欄位決定（預設 `"English"`）。詳細行為見 §5.4。
 
 ### 3.2 熱鍵選擇注意事項
 
@@ -179,13 +172,13 @@ STT 與 LLM 校正**各自獨立設定** API URL／API Key／模型（設定視�
   - 此為對「不自動轉條列」規則的**有條件放寬**，僅在使用者主動開啟時生效；關閉時行為與之前完全相同。
   - 排版需同時開啟「LLM 輕度校正」（`enable_correction`）才會生效，因為 `enable_correction` 關閉時完全跳過校正呼叫（見 `controller.rs::process`）。
 
-### 5.4 翻譯輸出（獨立於輕度校正，2026-07-30 新增）
+### 5.4 翻譯輸出（獨立於輕度校正，2026-07-30 新增，2026-07-31 改為設定切換）
 
-按翻譯熱鍵（見 §3.1a）開始的錄音，停止後改走**翻譯**而非輕度校正；兩者互斥，同一次錄音只會走其中一種分支（`controller.rs::process` 依 `OutputMode` 分派到 `process_direct` 或 `process_translate`）。
+設定視窗開啟「啟用翻譯模式」（`translate_mode_active`）後，下一次用熱鍵開始的錄音停止後改走**翻譯**而非輕度校正；兩者互斥，同一次錄音只會走其中一種分支（`controller.rs::process` 依 `OutputMode` 分派到 `process_direct` 或 `process_translate`）。是否翻譯在 `Idle→Recording` 轉換的當下讀取設定檔決定（見 §3.1），全程不受錄音/處理期間之後的設定變更影響。
 
 - **獨立提示詞、單次 LLM 呼叫**：翻譯使用 `transcribe.rs` 的 `TRANSLATE_SYSTEM_PROMPT_TEMPLATE`，與校正用的 `BASE_SYSTEM_PROMPT` 完全分開維護、不共用規則編號。`transcribe::translate()` 一次 LLM 呼叫就同時完成「輕度清理＋翻譯成目標語言」，不是先呼叫校正、再呼叫翻譯兩次。
 - **目標語言由 `target_language` 決定**（`config.toml` 欄位，預設 `"English"`；設定視窗提供常用語言下拉＋「自訂…」輸入框）。提示詞會替換 `{target_language}` 佔位符，並明令「若原文本來就是目標語言，只做清理不要生硬翻譯」，避免同語言互譯出現怪異改寫。
-- **不受 `enable_correction` 影響**：按翻譯熱鍵開始錄音即代表使用者已明確要求翻譯，`process_translate()` 不檢查 `enable_correction`（該開關只影響一般模式是否呼叫校正，見 `process_direct`）。
+- **不受 `enable_correction` 影響**：開啟翻譯模式即代表使用者已明確要求翻譯，`process_translate()` 不檢查 `enable_correction`（該開關只影響一般模式是否呼叫校正，見 `process_direct`）。
 - **降級規則比照校正**（見 §6.2）：LLM API key 未設定，或翻譯呼叫真正失敗（網路／API 狀態碼／非 JSON）→ 發系統通知（「翻譯已略過」／「翻譯失敗」）並降級輸出 STT 原始辨識文字；LLM 回應空字串（極短/空輸入常見）→ 只記 log、不發通知，同樣降級輸出原始文字。只有錄音／STT 本身失敗才會回到 `Idle` 並顯示錯誤，不會進到翻譯這一步。
 - 既有的個人詞彙表（`vocabulary`）與智慧排版（`enable_formatting`）設定同樣套用到翻譯提示詞：詞彙表引導專有名詞在譯文中保留原樣（不翻譯、不音譯），智慧排版沿用相同的分段/條列與濃縮規則。
 - 翻譯結果連同 STT 原文與目標語言一併寫入歷史紀錄（`HistoryEntry` 的 `translated`/`target_language`/`source_text` 欄位，見 §7 附近的 `history.rs`），歷史紀錄視窗顯示「翻譯 → {語言}」標籤並可展開對照原文；一般模式的輸出這三個欄位分別為 `false`/`""`/`""`。
@@ -203,7 +196,7 @@ Idle
                             └─ 剪貼簿貼上到焦點視窗（失敗退回 enigo 打字）→ 回到 Idle（圖示變灰）
 ```
 
-> **錄音開始的訊號決定本次輸出走一般或翻譯分支**（見 §3.1a、§5.4）：按主熱鍵開始錄音 → 上圖的「LLM 輕度校正」分支；按翻譯熱鍵開始錄音 → 改走「LLM 翻譯」分支（`transcribe::translate`，overlay 疊加視窗同時改用藍紫色發光）。中途按下另一顆熱鍵僅用於停止錄音，不會改變本次已決定的分支；本質仍是同一個 `Idle → Recording → Processing` 迴圈，只是輸出分支多了一種。
+> **開始錄音當下讀取設定檔的 `translate_mode_active`，決定本次輸出走一般或翻譯分支**（見 §3.1、§5.4）：開關關閉時開始錄音 → 上圖的「LLM 輕度校正」分支；開關開啟時開始錄音 → 改走「LLM 翻譯」分支（`transcribe::translate`，overlay 疊加視窗同時改用藍紫色發光）。錄音期間（甚至停止後處理期間）去設定視窗切換開關，不會改變本次已決定的分支，只影響下一次錄音；本質仍是同一個 `Idle → Recording → Processing` 迴圈，只是輸出分支多了一種，且不再需要第二支熱鍵來選擇。
 
 - 轉錄與校正在 `tokio::spawn` 的背景任務執行，**絕不可阻塞熱鍵監聽執行緒**。
 
@@ -249,8 +242,8 @@ hotkey       = "right_alt"        # 觸發鍵，可改 "right_ctrl" 等
 vocabulary        = ""            # 個人詞彙表，逗號或換行分隔；空＝不啟用，同時用於 STT prompt 與校正
 enable_formatting = false         # 智慧排版（opt-in）：長內容分段/條列並輕度濃縮；一般校正路徑（Direct）需 enable_correction 開啟才生效，翻譯路徑（Translate）則獨立生效、不受 enable_correction 影響
 
-target_language  = "English"      # 翻譯目標語言（英文語言名稱，如 English/Japanese），只在按翻譯熱鍵時生效
-translate_hotkey = "right_ctrl"   # 翻譯專用熱鍵，可改 scroll_lock 等；留空字串＝停用；不可與 hotkey 設為同一顆鍵
+target_language        = "English"  # 翻譯目標語言（英文語言名稱，如 English/Japanese），只在翻譯模式開啟時生效
+translate_mode_active  = false       # 翻譯模式開關：開啟後下一次用熱鍵開始的錄音會被翻譯，開始錄音當下讀取，不需重啟
 ```
 
 > 語言一律自動偵測（無 `language` 欄位）：STT 不送 `language`，忠實轉錄原語言。
@@ -296,7 +289,7 @@ translate_hotkey = "right_ctrl"   # 翻譯專用熱鍵，可改 scroll_lock 等�
 >
 > 註：**自動條列**原列為排除項，2026-07-05 由使用者主動要求後改為 **opt-in「智慧排版」**（`enable_formatting`，預設關閉）：使用者主動開啟時才允許長內容分段/條列並輕度濃縮成要點；關閉時仍完全排除，見 §5.3。
 >
-> 註：**翻譯**原列為明確排除項（本工具忠實轉錄原語言、絕不翻譯），2026-07-30 由使用者主動要求後新增 **opt-in 第二支翻譯熱鍵**（`translate_hotkey`，見 §3.1a、§5.4）：主熱鍵行為完全不變，仍絕不翻譯、忠實轉錄原語言；只有使用者主動按下翻譯熱鍵開始錄音時，該次輸出才會翻成 `target_language` 指定的目標語言。
+> 註：**翻譯**原列為明確排除項（本工具忠實轉錄原語言、絕不翻譯），2026-07-30 由使用者主動要求後新增 **opt-in 翻譯模式**（見 §3.1、§5.4）：熱鍵行為完全不變，仍絕不翻譯、忠實轉錄原語言；只有使用者在設定視窗主動開啟 `translate_mode_active` 時，下一次用熱鍵開始錄音的輸出才會翻成 `target_language` 指定的目標語言（2026-07-31 由「第二支翻譯熱鍵」判定改為此設定切換，開始錄音當下讀取、不需重啟）。
 
 ---
 
@@ -320,7 +313,8 @@ translate_hotkey = "right_ctrl"   # 翻譯專用熱鍵，可改 scroll_lock 等�
 16. **移除 API key 環境變數 fallback、修正校正 prompt 洩漏定界符**（2026-07-01，使用者主動要求）：`GROQ_API_KEY`/`.env`/`dotenvy` 整條路徑移除，API key 一律只能在設定視窗填入，錯誤訊息不再提及環境變數；同時修正校正用的 `SYSTEM_PROMPT` 與 user message，明確禁止把 `[逐字稿開始]`/`[逐字稿結束]` 這兩個分隔符號本身輸出出來（先前部分模型會把定界符也一起回傳）。（`config.rs`、`transcribe.rs`、`main.rs`、`Cargo.toml`）
 17. **STT 回應改用 `response_format=json` 並解析 `text` 欄位**（2026-07-01，使用者回報）：使用者換 STT 供應商後發現整包 JSON（含 `segments`/`usage`）被當成逐字稿。原本寫死 `response_format=text` 假設回應是純字串，但 `text` 非 Groq 預設值（預設是 `json`）且部分供應商不理會。改為送 `json` 並解析 `{"text": ...}`；容錯：JSON 物件缺 `text` 視為失敗、非 JSON 退回純文字。（`transcribe.rs`）
 18. **移除語言設定欄位，STT 一律自動偵測**（2026-07-01，使用者要求）：設定視窗的「語言」欄位與 `config.toml` 的 `language` 欄位整條移除（前端 UI → IPC → Config → STT 呼叫），STT 一律不送 `language` 參數、忠實轉錄原語言；同時放棄「指定 zh 時送繁體 prompt」，繁體轉換改全靠 LLM 校正。（`config.rs`、`commands.rs`、`transcribe.rs`、`controller.rs`、`ui/settings/`）
-19. **翻譯輸出（雙熱鍵，2026-07-30，使用者主動要求並已實作）**：新增可獨立設定的第二支翻譯熱鍵（`translate_hotkey`）與目標語言設定（`target_language`）；本次錄音開始時按的是哪顆鍵決定輸出走一般校正或翻譯（`OutputMode`）。翻譯使用獨立的 `TRANSLATE_SYSTEM_PROMPT_TEMPLATE`，一次 LLM 呼叫同時完成清理與翻譯，不受 `enable_correction` 影響，降級規則比照校正；overlay 疊加視窗翻譯模式改用藍紫色發光（一般模式維持活力橙）；歷史紀錄新增 `translated`/`target_language`/`source_text` 欄位並相容舊版無此欄位的 `history.json`；主熱鍵與翻譯熱鍵的可選項由 2 種擴充為 5 種（不含 `right_shift`：持續按右 Shift 打大寫字母會與正常打字衝突，故不提供）；翻譯熱鍵不可與主熱鍵相同，衝突時存檔會擋下、既有設定衝突則於啟動時停用並通知。（`config.rs`、`state.rs`、`hotkey.rs`、`transcribe.rs`、`controller.rs`、`commands.rs`、`overlay.rs`、`history.rs`、`main.rs`、`ui/settings/`、`ui/history/`、`ui/overlay/`）
+19. **翻譯輸出（雙熱鍵版，2026-07-30，使用者主動要求並已實作，同日於里程碑 20 回退）**：新增可獨立設定的第二支翻譯熱鍵（`translate_hotkey`）與目標語言設定（`target_language`）；本次錄音開始時按的是哪顆鍵決定輸出走一般校正或翻譯（`OutputMode`）。翻譯使用獨立的 `TRANSLATE_SYSTEM_PROMPT_TEMPLATE`，一次 LLM 呼叫同時完成清理與翻譯，不受 `enable_correction` 影響，降級規則比照校正；overlay 疊加視窗翻譯模式改用藍紫色發光（一般模式維持活力橙）；歷史紀錄新增 `translated`/`target_language`/`source_text` 欄位並相容舊版無此欄位的 `history.json`；主熱鍵與翻譯熱鍵的可選項由 2 種擴充為 5 種（不含 `right_shift`：持續按右 Shift 打大寫字母會與正常打字衝突，故不提供）；翻譯熱鍵不可與主熱鍵相同，衝突時存檔會擋下、既有設定衝突則於啟動時停用並通知。（`config.rs`、`state.rs`、`hotkey.rs`、`transcribe.rs`、`controller.rs`、`commands.rs`、`overlay.rs`、`history.rs`、`main.rs`、`ui/settings/`、`ui/history/`、`ui/overlay/`）
+20. **翻譯輸出改回單熱鍵＋設定切換（2026-07-31，使用者主動要求回退簡化）**：移除里程碑 19 的第二支翻譯熱鍵（`translate_hotkey`）與其衝突驗證（`validate_translate_hotkey`／`resolved_translate_key`），改為單一熱鍵維持不變、新增 `translate_mode_active` 設定（預設 `false`，設定視窗提供「啟用翻譯模式」勾選框）；`controller.rs` 在 `Idle→Recording` 轉換當下讀取這個開關決定 `OutputMode`，**不需重啟程式**。熱鍵可選項因此縮回 2 種（`right_alt`／`right_ctrl`），移除當初為雙熱鍵防衝突而加的 `scroll_lock`/`pause`/`insert`。翻譯提示詞、LLM 呼叫方式、降級規則、overlay 配色、歷史紀錄欄位皆沿用里程碑 19 的實作不變；托盤閒置 tooltip 新增顯示目前模式（`tray::set_idle_tooltip`）。（`config.rs`、`state.rs`、`hotkey.rs`、`controller.rs`、`commands.rs`、`tray.rs`、`ui/settings/`）
 
 ### 模組對照
 
@@ -331,13 +325,13 @@ translate_hotkey = "right_ctrl"   # 翻譯專用熱鍵，可改 scroll_lock 等�
 | `main.rs` | 進入點、執行緒接線、Tauri 事件迴圈 |
 | `config.rs` | 設定檔讀取／儲存（`app_config_dir()` 為權威位置，向後相容舊位置） |
 | `commands.rs` | 設定／歷史紀錄視窗用的 IPC commands |
-| `state.rs` | `AppState` 狀態定義；`OutputMode`（一般／翻譯，由開始錄音的熱鍵決定） |
-| `hotkey.rs` | `rdev` 雙熱鍵監聽（主熱鍵＋翻譯熱鍵各自 toggle 偵測） |
+| `state.rs` | `AppState` 狀態定義；`OutputMode`（一般／翻譯，由開始錄音當下讀取的 `translate_mode_active` 決定） |
+| `hotkey.rs` | `rdev` 單熱鍵 toggle 監聽（翻譯與否改由設定檔 `translate_mode_active` 決定，與熱鍵無關） |
 | `audio.rs` | `cpal` 錄音 + 降取樣 + `hound` 封裝 WAV + 音量輸出 |
 | `transcribe.rs` | Groq STT 與 LLM 校正／翻譯（獨立系統提示） |
 | `controller.rs` | 狀態機協調、管線（依 `OutputMode` 分派一般校正或翻譯）、容錯降級 |
 | `typer.rs` | 剪貼簿貼上輸出（Ctrl+V；失敗退回 `enigo`） |
-| `tray.rs` | 系統列圖示、狀態顯示、選單（設定／歷史紀錄／結束） |
+| `tray.rs` | 系統列圖示、狀態顯示、選單（設定／歷史紀錄／結束）；閒置 tooltip 附加目前模式 |
 | `overlay.rs` | 麥克風圖示疊加視窗的生命週期管理（顯示／隱藏／定位／NOACTIVATE／一般或翻譯配色） |
 | `history.rs` | 轉錄文字歷史紀錄讀寫（`app_data_dir()/history.json`，含翻譯關聯欄位） |
 | `notify.rs` | 背景執行緒失敗時發 Windows 系統通知（`tauri-plugin-notification`） |
