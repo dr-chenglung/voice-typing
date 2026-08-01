@@ -57,7 +57,7 @@ fn open_settings_window(app: &AppHandle) {
         WebviewUrl::App("settings/index.html".into()),
     )
     .title("設定 Settings")
-    .inner_size(480.0, 780.0)
+    .inner_size(760.0, 700.0)
     .resizable(false)
     .additional_browser_args(crate::WEBVIEW_ARGS)
     .build()

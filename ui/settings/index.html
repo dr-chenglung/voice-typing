@@ -9,96 +9,105 @@
 <form id="form">
   <h1>語音免打字 — 設定</h1>
 
-  <fieldset>
-    <legend>語音轉文字 (STT)</legend>
-    <label>
-      STT API Key
-      <input type="password" id="stt_api_key" placeholder="留空＝不變更目前已設定的金鑰" autocomplete="off" />
-    </label>
-    <p class="hint" id="stt_api_key_hint"></p>
+  <div class="grid">
+    <div class="column">
+      <fieldset>
+        <legend>語音轉文字 (STT)</legend>
+        <label>
+          STT API Key
+          <input type="password" id="stt_api_key" placeholder="留空＝不變更目前已設定的金鑰" autocomplete="off" />
+        </label>
+        <p class="hint" id="stt_api_key_hint"></p>
 
-    <label>
-      STT API URL
-      <input type="text" id="stt_api_url" placeholder="https://api.groq.com/openai/v1/audio/transcriptions" />
-    </label>
+        <label>
+          STT API URL
+          <input type="text" id="stt_api_url" placeholder="https://api.groq.com/openai/v1/audio/transcriptions" />
+        </label>
 
-    <label>
-      STT 模型
-      <input type="text" id="stt_model" />
-    </label>
-  </fieldset>
+        <label>
+          STT 模型
+          <input type="text" id="stt_model" />
+        </label>
+      </fieldset>
 
-  <fieldset>
-    <legend>文字校正 (LLM)</legend>
-    <label>
-      LLM API Key
-      <input type="password" id="llm_api_key" placeholder="留空＝不變更目前已設定的金鑰" autocomplete="off" />
-    </label>
-    <p class="hint" id="llm_api_key_hint"></p>
+      <fieldset>
+        <legend>文字校正 (LLM)</legend>
+        <label>
+          LLM API Key
+          <input type="password" id="llm_api_key" placeholder="留空＝不變更目前已設定的金鑰" autocomplete="off" />
+        </label>
+        <p class="hint" id="llm_api_key_hint"></p>
 
-    <label>
-      LLM API URL
-      <input type="text" id="llm_api_url" placeholder="https://api.groq.com/openai/v1/chat/completions" />
-    </label>
+        <label>
+          LLM API URL
+          <input type="text" id="llm_api_url" placeholder="https://api.groq.com/openai/v1/chat/completions" />
+        </label>
 
-    <label>
-      校正用 LLM 模型
-      <input type="text" id="llm_model" />
-    </label>
+        <label>
+          校正用 LLM 模型
+          <input type="text" id="llm_model" />
+        </label>
 
-    <label>
-      個人詞彙表
-      <textarea id="vocabulary" rows="3" placeholder="常用專有名詞，逗號或換行分隔，例：Tauri, Rust, cpal, 系統列"></textarea>
-    </label>
-    <p class="hint">同時用於語音辨識引導（Whisper prompt）與校正時修正音譯/誤辨的專有名詞。</p>
+        <label>
+          個人詞彙表
+          <textarea id="vocabulary" rows="3" placeholder="常用專有名詞，逗號或換行分隔，例：Tauri, Rust, cpal, 系統列"></textarea>
+        </label>
+        <p class="hint">同時用於語音辨識引導（Whisper prompt）與校正時修正音譯/誤辨的專有名詞。</p>
 
-    <label class="checkbox">
-      <input type="checkbox" id="enable_formatting" />
-      智慧排版（長內容自動分段/條列，允許輕度濃縮）
-    </label>
-    <p class="hint">需同時啟用下方「LLM 輕度校正」才會生效；短內容仍維持單一段落不排版。</p>
-  </fieldset>
+        <label class="checkbox">
+          <input type="checkbox" id="enable_formatting" />
+          智慧排版（長內容自動分段/條列，允許輕度濃縮）
+        </label>
+        <p class="hint">需同時啟用下方「LLM 輕度校正」才會生效；短內容仍維持單一段落不排版。</p>
 
-  <label class="checkbox">
-    <input type="checkbox" id="enable_correction" />
-    啟用 LLM 輕度校正
-  </label>
+        <label class="checkbox">
+          <input type="checkbox" id="enable_correction" />
+          啟用 LLM 輕度校正
+        </label>
+      </fieldset>
+    </div>
 
-  <label>
-    熱鍵
-    <select id="hotkey">
-      <option value="right_alt">右 Alt（預設）</option>
-      <option value="right_ctrl">右 Ctrl</option>
-    </select>
-  </label>
-  <p class="hint">變更熱鍵後需要重新啟動程式才會生效。</p>
+    <div class="column">
+      <fieldset>
+        <legend>熱鍵設定</legend>
+        <label>
+          熱鍵
+          <select id="hotkey">
+            <option value="right_alt">右 Alt（預設）</option>
+            <option value="right_ctrl">右 Ctrl</option>
+          </select>
+        </label>
+        <p class="hint">變更熱鍵後需要重新啟動程式才會生效。</p>
+      </fieldset>
 
-  <fieldset>
-    <legend>翻譯輸出</legend>
-    <label>
-      目標語言
-      <select id="target_language_select">
-        <option value="English">英文 English</option>
-        <option value="Japanese">日文 Japanese</option>
-        <option value="Korean">韓文 Korean</option>
-        <option value="Simplified Chinese">簡體中文 Simplified Chinese</option>
-        <option value="Traditional Chinese">繁體中文 Traditional Chinese</option>
-        <option value="Spanish">西班牙文 Spanish</option>
-        <option value="Vietnamese">越南文 Vietnamese</option>
-        <option value="__custom__">自訂…</option>
-      </select>
-    </label>
-    <label id="target_language_custom_row" class="hidden">
-      自訂目標語言（英文語言名稱，例：French）
-      <input type="text" id="target_language_custom" placeholder="French" />
-    </label>
+      <fieldset>
+        <legend>翻譯輸出</legend>
+        <label>
+          目標語言
+          <select id="target_language_select">
+            <option value="English">英文 English</option>
+            <option value="Japanese">日文 Japanese</option>
+            <option value="Korean">韓文 Korean</option>
+            <option value="Simplified Chinese">簡體中文 Simplified Chinese</option>
+            <option value="Traditional Chinese">繁體中文 Traditional Chinese</option>
+            <option value="Spanish">西班牙文 Spanish</option>
+            <option value="Vietnamese">越南文 Vietnamese</option>
+            <option value="__custom__">自訂…</option>
+          </select>
+        </label>
+        <label id="target_language_custom_row" class="hidden">
+          自訂目標語言（英文語言名稱，例：French）
+          <input type="text" id="target_language_custom" placeholder="French" />
+        </label>
 
-    <label class="checkbox">
-      <input type="checkbox" id="translate_mode_active" />
-      啟用翻譯模式（下次用熱鍵錄音會直接翻譯成上面的目標語言，而非一般校正）
-    </label>
-    <p class="hint">存檔立即生效，不需要重啟程式；下一次按熱鍵錄音就會套用。</p>
-  </fieldset>
+        <label class="checkbox">
+          <input type="checkbox" id="translate_mode_active" />
+          啟用翻譯模式（下次用熱鍵錄音會直接翻譯成上面的目標語言，而非一般校正）
+        </label>
+        <p class="hint">存檔立即生效，不需要重啟程式；下一次按熱鍵錄音就會套用。</p>
+      </fieldset>
+    </div>
+  </div>
 
   <div class="actions">
     <button type="submit" id="save">儲存</button>
