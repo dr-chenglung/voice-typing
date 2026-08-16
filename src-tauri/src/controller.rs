@@ -94,7 +94,10 @@ pub fn run(rx: Receiver<()>, app: AppHandle, cfg: Arc<Mutex<Config>>, level: Arc
                 let rec = recorder.take().expect("Recording 狀態必有 recorder");
                 let snapshot = cfg.lock().unwrap().clone();
                 match process(&rt, &client, &snapshot, rec, session_mode, &app) {
-                    Ok(out) => {
+                    // 整段沒偵測到說話：不打字、不寫歷史，也刻意不發系統通知
+                    //（使用者自己知道剛剛沒講話，跳通知只是噪音），只留 log 後回 Idle。
+                    Ok(None) => println!("[controller] 本次錄音未偵測到說話，已略過辨識"),
+                    Ok(Some(out)) => {
                         if let Err(e) = typer::type_text(&out.text) {
                             flash_error(&app, &format!("輸入失敗: {e}"));
                         } else {
@@ -147,6 +150,9 @@ fn set_state(app: &AppHandle, state: AppState, session_mode: OutputMode, cfg: &A
 }
 
 /// 完整管線：停止錄音 → STT → 依模式分派到一般校正或翻譯。
+///
+/// 回傳 `Ok(None)` 代表「這次錄音整段都沒人說話」，屬正常情況而非錯誤：
+/// 直接跳過 STT 呼叫，呼叫端什麼都不做就回 Idle。
 fn process(
     rt: &tokio::runtime::Runtime,
     client: &reqwest::Client,
@@ -154,9 +160,11 @@ fn process(
     rec: Recorder,
     mode: OutputMode,
     app: &AppHandle,
-) -> Result<Output> {
+) -> Result<Option<Output>> {
     let stt_key = cfg.resolve_stt_api_key()?;
-    let wav = rec.stop_to_wav()?;
+    let Some(wav) = rec.stop_to_wav()? else {
+        return Ok(None);
+    };
     let raw = rt.block_on(transcribe::transcribe(
         client,
         &stt_key,
@@ -172,8 +180,8 @@ fn process(
     println!("[whisper] {raw}");
 
     match mode {
-        OutputMode::Direct => process_direct(rt, client, cfg, raw, app),
-        OutputMode::Translate => process_translate(rt, client, cfg, raw, app),
+        OutputMode::Direct => process_direct(rt, client, cfg, raw, app).map(Some),
+        OutputMode::Translate => process_translate(rt, client, cfg, raw, app).map(Some),
     }
 }
 
