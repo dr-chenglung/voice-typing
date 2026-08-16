@@ -1,6 +1,6 @@
 [package]
 name = "voicetyping"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "語音免打字工具：按熱鍵錄音 → Groq Whisper 轉文字 → Groq LLM 校正 → enigo 打字進焦點視窗"
 
