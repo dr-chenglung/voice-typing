@@ -12,13 +12,24 @@ const TARGET_RATE: u32 = 16_000;
 const MAX_WAV_BYTES: usize = 25 * 1024 * 1024; // Groq 25MB 上限
 /// 靜音判定的視窗長度（毫秒）。夠短才抓得到很簡短的一句話。
 const SILENCE_WINDOW_MS: usize = 30;
-/// 說話必須高出底噪的倍數，超過才算有人講話。4 倍約等於 12 dB。
+/// 說話必須高出底噪的倍數，超過才算有人講話。3 倍約等於 9.5 dB。
 ///
 /// 這是「相對」門檻而非絕對音量，原因是 2026-08-16 用絕對門檻連調三次都不可靠：
 /// Windows 的麥克風音量滑桿與麥克風增強、不同麥克風的靈敏度、講話距離，都會把訊號
 /// 整體乘上一個倍率，使得任何絕對數值只對「某一台機器的某一組設定」成立。
 /// 改看比值後，整體增益會同時放大說話與底噪、比值不變，判定因此與音量設定無關。
-const SPEECH_OVER_FLOOR_RATIO: f32 = 4.0;
+///
+/// 倍數由 4.0 放寬到 3.0（使用者要求，讓人不必刻意大聲講話）。實測參考值：
+/// 不出聲 2.3 倍、正常說話 5.9 倍。放寬後距離「不出聲」只剩約 2.3 dB，
+/// 單靠倍數已不足以擋掉突發雜音，故**同時**加上 `MIN_SPEECH_WINDOWS` 的持續時間條件。
+const SPEECH_OVER_FLOOR_RATIO: f32 = 3.0;
+/// 超過門檻的視窗要有幾個，才算真的有人在講話（4 個視窗 = 120 ms）。
+///
+/// 用途是擋掉單一突發雜音：敲鍵盤、椅子聲、呼吸只會佔一兩個視窗，而真正的說話
+/// 就算只講一個字也會持續好幾個視窗。這個條件讓安全性由「要持續一段時間」負責，
+/// 倍數門檻才有本錢放寬。訂 4 個（而非更多）是為了保留很短的單音節應答——
+/// 一般人刻意講一個字通常有 150~250 ms；若實測發現短應答被吃掉，可再往下調。
+const MIN_SPEECH_WINDOWS: usize = 4;
 /// 估計底噪時取的百分位數。取偏低的分位數，才不會被說話聲本身墊高。
 const NOISE_FLOOR_PERCENTILE: f32 = 0.20;
 /// 絕對安全下限（RMS，約 -74 dBFS）：峰值低於此值一律視為沒說話，不看比值。
@@ -28,24 +39,33 @@ const NOISE_FLOOR_PERCENTILE: f32 = 0.20;
 /// 訂得極低以免又變回會誤殺真實語音的絕對門檻。
 const MIN_SPEECH_PEAK_RMS: f32 = 0.0002;
 
-/// 一段錄音的音量輪廓：最大聲的視窗，以及估計出來的背景底噪水準。
+/// 一段錄音的音量輪廓：最大聲的視窗、估計出來的背景底噪水準，以及明顯高於底噪的視窗數。
 #[derive(Debug, Clone, Copy)]
 pub struct LevelProfile {
     /// 最大聲視窗的 RMS。
     pub peak: f32,
     /// 底噪水準（視窗 RMS 的第 `NOISE_FLOOR_PERCENTILE` 百分位數）。
     pub floor: f32,
+    /// 超過 `floor × SPEECH_OVER_FLOOR_RATIO` 的視窗數，即「大聲講話持續了多久」。
+    pub loud_windows: usize,
 }
 
 impl LevelProfile {
-    /// 說話音量相對於底噪的倍數，即判定所依據的值。底噪為 0 時回傳極大值。
+    /// 峰值相對於底噪的倍數。底噪為 0 時分母以極小值代入，回傳極大值。
     pub fn ratio(&self) -> f32 {
         self.peak / self.floor.max(1e-9)
     }
 
     /// 這段錄音是否從頭到尾都沒有人說話。
+    ///
+    /// 三個條件任一成立即判定為沒說話：
+    /// 1. 峰值低於絕對安全下限（麥克風被靜音時的量化雜訊，比值無意義）。
+    /// 2. 峰值不到底噪的 `SPEECH_OVER_FLOOR_RATIO` 倍（整段平坦，與底噪無異）。
+    /// 3. 超過門檻的視窗不足 `MIN_SPEECH_WINDOWS` 個（只是突發雜音，沒有持續講話）。
     pub fn is_silent(&self) -> bool {
-        self.peak < MIN_SPEECH_PEAK_RMS || self.ratio() < SPEECH_OVER_FLOOR_RATIO
+        self.peak < MIN_SPEECH_PEAK_RMS
+            || self.ratio() < SPEECH_OVER_FLOOR_RATIO
+            || self.loud_windows < MIN_SPEECH_WINDOWS
     }
 }
 
@@ -69,15 +89,21 @@ pub fn analyze_levels(samples: &[f32], sample_rate: u32) -> LevelProfile {
         return LevelProfile {
             peak: 0.0,
             floor: 0.0,
+            loud_windows: 0,
         };
     }
     let peak = windows.iter().copied().fold(0.0f32, f32::max);
     // 只需要第 k 小的值，用 select_nth 就好，不必整個排序。
     let k = ((windows.len() as f32 * NOISE_FLOOR_PERCENTILE) as usize).min(windows.len() - 1);
     windows.select_nth_unstable_by(k, |a, b| a.total_cmp(b));
+    let floor = windows[k];
+    // select_nth 只做部分重排，不影響「數有幾個超過門檻」。
+    let cutoff = floor.max(1e-9) * SPEECH_OVER_FLOOR_RATIO;
+    let loud_windows = windows.iter().filter(|&&w| w > cutoff).count();
     LevelProfile {
         peak,
-        floor: windows[k],
+        floor,
+        loud_windows,
     }
 }
 
@@ -166,10 +192,12 @@ impl Recorder {
         // 實測值一律印出（不論判定結果），供日後調整判定參數時對照真實錄音。
         let levels = analyze_levels(&samples, sample_rate);
         println!(
-            "[audio] 音量輪廓：峰值 RMS {:.5}／底噪 {:.5}／比值 {:.1} 倍（需 > {SPEECH_OVER_FLOOR_RATIO} 倍才算有說話）",
+            "[audio] 音量輪廓：峰值 RMS {:.5}／底噪 {:.5}／比值 {:.1} 倍（需 > {SPEECH_OVER_FLOOR_RATIO}）／超標視窗 {} 個 ≈ {} ms（需 ≥ {MIN_SPEECH_WINDOWS} 個）",
             levels.peak,
             levels.floor,
-            levels.ratio()
+            levels.ratio(),
+            levels.loud_windows,
+            levels.loud_windows * SILENCE_WINDOW_MS
         );
         if levels.is_silent() {
             println!("[audio] 音量起伏與底噪無異，判定為未說話，跳過辨識");
@@ -346,14 +374,25 @@ mod tests {
         assert!(silent(&samples));
     }
 
-    /// 整段大多安靜、只有中間短短一下有講話，仍必須判定為有說話
-    /// （長錄音裡的短句不可被大量靜音稀釋而誤殺）。
+    /// 整段大多安靜、只有中間短短一句話，仍必須判定為有說話
+    /// （長錄音裡的短句不可被大量靜音稀釋而誤殺）。150ms ≈ 5 個視窗。
     #[test]
-    fn a_short_burst_in_a_long_quiet_recording_is_not_silent() {
+    fn a_short_utterance_in_a_long_quiet_recording_is_not_silent() {
         let mut samples = vec![0.0f32; RATE as usize * 2];
-        let burst = steady_noise(480, 0.3);
-        samples[16_000..16_480].copy_from_slice(&burst);
+        let utterance = steady_noise(2_400, 0.3);
+        samples[8_000..10_400].copy_from_slice(&utterance);
         assert!(!silent(&samples));
+    }
+
+    /// 單一突發雜音（敲鍵盤、椅子聲、呼吸）只會佔一兩個視窗，不該算成說話。
+    /// 這是把倍數門檻放寬到 3 倍的前提：安全性改由「要持續一段時間」負責，
+    /// 而不是靠倍數訂高——否則不出聲的錄音只要有人碰一下桌子就會被送去辨識。
+    #[test]
+    fn an_isolated_click_is_not_treated_as_speech() {
+        let mut samples = steady_noise(RATE as usize * 2, 0.002);
+        let click = steady_noise(480, 0.2); // 30ms，僅一個視窗
+        samples[8_000..8_480].copy_from_slice(&click);
+        assert!(silent(&samples));
     }
 
     #[test]
