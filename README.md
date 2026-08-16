@@ -4,9 +4,13 @@
 設定視窗可另外開啟**翻譯模式**，開啟後下一次按熱鍵錄音就會把輸出翻譯成設定的目標語言，而非只做輕度校正。
 常駐 Windows 系統列（工作列右下角通知區域）。完整需求見 [`voicetyping-spec.md`](./voicetyping-spec.md)。
 
-## 環境需求
+## 下載安裝
 
-> 本專案以**原始碼形式**發布，未提供預建的安裝檔／執行檔，請自行建置（見下方 [建置與執行](#建置與執行)）。
+到 [Releases](https://github.com/dr-chenglung/voice-typing/releases) 下載最新的 `VoiceTyping_<版本>_x64-setup.exe`，執行後依指示安裝即可。也可以自行從原始碼建置（見下方 [建置與執行](#建置與執行)）。
+
+> **關於 Windows SmartScreen 警告**：安裝檔**未經程式碼簽章**（憑證需年費申購），因此首次執行時 Windows 會跳出藍色的「已保護您的電腦」警告。這是「這個發行者尚未購買憑證」的提示，不是偵測到惡意程式。若要繼續安裝，點警告視窗裡的**「其他資訊」**再點**「仍要執行」**。不放心的話，請改用下方的原始碼自行建置。
+
+## 環境需求
 
 - Windows 10/11（需 WebView2 Runtime；Win10/11 多數已預裝，缺少時可自行安裝 [Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)）
 - Rust（穩定版，MSVC toolchain）
