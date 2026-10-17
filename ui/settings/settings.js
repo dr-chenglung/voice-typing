@@ -1,16 +1,14 @@
 // 設定視窗：讀取/儲存 config.toml（經由 Rust 端 get_config/save_config command）。
-// API key 絕不從後端明文取回：get_config 只回 has_api_key 布林值，
-// save_config 的 api_key 欄位留空字串代表「不變更現有金鑰」。
+// API key 由 get_config 明文取回並填入欄位，預設以圓點遮住，按眼睛按鈕切換顯示；
+// save_config 以欄位內容為準（留空＝清除金鑰）。
 
 const { core } = window.__TAURI__;
 
 const form = document.getElementById("form");
 const sttApiKeyInput = document.getElementById("stt_api_key");
-const sttApiKeyHint = document.getElementById("stt_api_key_hint");
 const sttApiUrlInput = document.getElementById("stt_api_url");
 const sttModelInput = document.getElementById("stt_model");
 const llmApiKeyInput = document.getElementById("llm_api_key");
-const llmApiKeyHint = document.getElementById("llm_api_key_hint");
 const llmApiUrlInput = document.getElementById("llm_api_url");
 const llmModelInput = document.getElementById("llm_model");
 const vocabularyInput = document.getElementById("vocabulary");
@@ -52,14 +50,10 @@ let originalHotkey = "";
 
 async function load() {
   const cfg = await core.invoke("get_config");
-  sttApiKeyHint.textContent = cfg.has_stt_api_key
-    ? "目前已設定金鑰（留空儲存＝保留不變）"
-    : "尚未設定金鑰";
+  sttApiKeyInput.value = cfg.stt_api_key;
   sttApiUrlInput.value = cfg.stt_api_url;
   sttModelInput.value = cfg.stt_model;
-  llmApiKeyHint.textContent = cfg.has_llm_api_key
-    ? "目前已設定金鑰（留空儲存＝保留不變）"
-    : "尚未設定金鑰";
+  llmApiKeyInput.value = cfg.llm_api_key;
   llmApiUrlInput.value = cfg.llm_api_url;
   llmModelInput.value = cfg.llm_model;
   vocabularyInput.value = cfg.vocabulary;
@@ -84,10 +78,10 @@ form.addEventListener("submit", async (ev) => {
   try {
     await core.invoke("save_config", {
       update: {
-        stt_api_key: sttApiKeyInput.value,
+        stt_api_key: sttApiKeyInput.value.trim(),
         stt_api_url: sttApiUrlInput.value.trim(),
         stt_model: sttModelInput.value.trim(),
-        llm_api_key: llmApiKeyInput.value,
+        llm_api_key: llmApiKeyInput.value.trim(),
         llm_api_url: llmApiUrlInput.value.trim(),
         llm_model: llmModelInput.value.trim(),
         vocabulary: vocabularyInput.value.trim(),
@@ -98,8 +92,6 @@ form.addEventListener("submit", async (ev) => {
         translate_mode_active: translateModeActiveInput.checked,
       },
     });
-    sttApiKeyInput.value = "";
-    llmApiKeyInput.value = "";
     const hotkeyChanged = hotkeySelect.value !== originalHotkey;
     const restartNote = hotkeyChanged ? "（熱鍵已變更，需重啟程式才生效）" : "";
     statusEl.textContent = `已儲存 ${restartNote}`;
@@ -108,5 +100,17 @@ form.addEventListener("submit", async (ev) => {
     statusEl.textContent = `儲存失敗：${err}`;
   }
 });
+
+// 眼睛按鈕：切換金鑰欄位的遮罩（password ↔ text）。
+for (const btn of document.querySelectorAll("button.reveal")) {
+  const input = document.getElementById(btn.dataset.target);
+  btn.addEventListener("click", () => {
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    btn.setAttribute("aria-pressed", String(show));
+    btn.title = show ? "隱藏金鑰" : "顯示金鑰";
+    btn.setAttribute("aria-label", btn.title);
+  });
+}
 
 load();

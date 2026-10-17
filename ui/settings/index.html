@@ -15,9 +15,11 @@
         <legend>語音轉文字 (STT)</legend>
         <label>
           STT API Key
-          <input type="password" id="stt_api_key" placeholder="留空＝不變更目前已設定的金鑰" autocomplete="off" />
+          <span class="key-row">
+            <input type="password" id="stt_api_key" placeholder="例如 gsk_…；本機 API 隨便填一個字串即可" autocomplete="off" spellcheck="false" />
+            <button type="button" class="reveal" data-target="stt_api_key" title="顯示金鑰" aria-label="顯示金鑰" aria-pressed="false"></button>
+          </span>
         </label>
-        <p class="hint" id="stt_api_key_hint"></p>
 
         <label>
           STT API URL
@@ -34,9 +36,11 @@
         <legend>文字校正 (LLM)</legend>
         <label>
           LLM API Key
-          <input type="password" id="llm_api_key" placeholder="留空＝不變更目前已設定的金鑰" autocomplete="off" />
+          <span class="key-row">
+            <input type="password" id="llm_api_key" placeholder="例如 gsk_…；本機 API 隨便填一個字串即可" autocomplete="off" spellcheck="false" />
+            <button type="button" class="reveal" data-target="llm_api_key" title="顯示金鑰" aria-label="顯示金鑰" aria-pressed="false"></button>
+          </span>
         </label>
-        <p class="hint" id="llm_api_key_hint"></p>
 
         <label>
           LLM API URL

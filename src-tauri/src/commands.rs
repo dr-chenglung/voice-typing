@@ -1,6 +1,8 @@
 //! 設定視窗用的 IPC commands（規格新增功能）。
-//! API key 不可明文回傳前端：`get_config` 只回報「是否已設定」，`save_config` 的
-//! `api_key` 留空代表「不變更」，避免明文塞進 DOM／devtools 可見。
+//! API key 會明文回傳前端（2026-10 使用者要求）：設定頁預設以圓點遮住、按眼睛按鈕才顯示。
+//! 原本只回報「是否已設定」、欄位永遠空白，使用者看不出已填哪一把而困惑；金鑰本來就以
+//! 明文存在 %APPDATA% 的 config.toml，前端遮不遮對安全性影響不大。`save_config` 以欄位
+//! 內容為準，留空代表清除金鑰。
 
 use std::sync::{Arc, Mutex};
 
@@ -12,11 +14,11 @@ use crate::history::{self, HistoryEntry};
 
 #[derive(Serialize)]
 pub struct ConfigView {
-    pub has_stt_api_key: bool,
+    pub stt_api_key: String,
     pub stt_api_url: String,
     pub stt_model: String,
 
-    pub has_llm_api_key: bool,
+    pub llm_api_key: String,
     pub llm_api_url: String,
     pub llm_model: String,
 
@@ -32,12 +34,12 @@ pub struct ConfigView {
 
 #[derive(Deserialize)]
 pub struct ConfigUpdate {
-    /// 留空字串＝不變更現有 API key。
+    /// 欄位內容即為要使用的 API key，留空＝清除。
     pub stt_api_key: String,
     pub stt_api_url: String,
     pub stt_model: String,
 
-    /// 留空字串＝不變更現有 API key。
+    /// 欄位內容即為要使用的 API key，留空＝清除。
     pub llm_api_key: String,
     pub llm_api_url: String,
     pub llm_model: String,
@@ -56,10 +58,10 @@ pub struct ConfigUpdate {
 pub fn get_config(cfg: State<'_, Arc<Mutex<Config>>>) -> ConfigView {
     let c = cfg.lock().unwrap();
     ConfigView {
-        has_stt_api_key: !c.stt_api_key.trim().is_empty(),
+        stt_api_key: c.stt_api_key.clone(),
         stt_api_url: c.stt_api_url.clone(),
         stt_model: c.stt_model.clone(),
-        has_llm_api_key: !c.llm_api_key.trim().is_empty(),
+        llm_api_key: c.llm_api_key.clone(),
         llm_api_url: c.llm_api_url.clone(),
         llm_model: c.llm_model.clone(),
         enable_correction: c.enable_correction,
@@ -105,14 +107,10 @@ pub fn save_config(
     validate_config_update(&update)?;
     let snapshot = {
         let mut c = cfg.lock().unwrap();
-        if !update.stt_api_key.trim().is_empty() {
-            c.stt_api_key = update.stt_api_key.trim().to_string();
-        }
+        c.stt_api_key = update.stt_api_key.trim().to_string();
         c.stt_api_url = update.stt_api_url;
         c.stt_model = update.stt_model;
-        if !update.llm_api_key.trim().is_empty() {
-            c.llm_api_key = update.llm_api_key.trim().to_string();
-        }
+        c.llm_api_key = update.llm_api_key.trim().to_string();
         c.llm_api_url = update.llm_api_url;
         c.llm_model = update.llm_model;
         c.enable_correction = update.enable_correction;
