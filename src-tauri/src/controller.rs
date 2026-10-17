@@ -122,7 +122,8 @@ pub fn run(rx: Receiver<()>, app: AppHandle, cfg: Arc<Mutex<Config>>, level: Arc
     }
 }
 
-/// 依狀態更新托盤圖示／tooltip，並同步 overlay 視窗顯示/隱藏（僅錄音中顯示）。
+/// 依狀態更新托盤圖示／tooltip，並同步 overlay 視窗：錄音中顯示麥克風、處理中顯示
+/// 旋轉光圈（等待 STT／LLM 回傳時的「運作中」提示），回 Idle 才隱藏。
 /// `Idle` 時的 tooltip 要顯示「當下設定檔的即時模式」（不是 `session_mode`，因為使用者
 /// 可能在錄音/處理中途去設定視窗切換了開關），所以另外讀 `cfg`；`Recording` 時 overlay
 /// 配色用 `session_mode`（這次錄音鎖定的模式，不受之後設定變更影響）。
@@ -144,7 +145,7 @@ fn set_state(app: &AppHandle, state: AppState, session_mode: OutputMode, cfg: &A
         }
         AppState::Processing => {
             tray::set_state(app, state);
-            overlay::hide(app);
+            overlay::processing(app);
         }
     }
 }

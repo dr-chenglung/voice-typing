@@ -93,6 +93,20 @@ pub fn show(app: &AppHandle, translate: bool) {
     }
 }
 
+/// 切換為「處理中」樣式：錄音已結束、正在等 STT／LLM 回傳時呼叫。
+/// 視窗維持顯示（錄音時本來就在畫面上），前端改畫旋轉光圈＋麥克風呼吸動畫，
+/// 讓處理較久時使用者知道程式仍在運作。同時停止音量推播（此時已無音訊可推）。
+pub fn processing(app: &AppHandle) {
+    if let Some(flag) = app.try_state::<OverlayVisible>() {
+        flag.0.store(false, Ordering::Relaxed);
+    }
+    let Some(window) = app.get_webview_window("overlay") else {
+        return;
+    };
+    let _ = window.emit_to("overlay", "overlay-processing", ());
+    let _ = window.show();
+}
+
 /// 隱藏疊加視窗。
 pub fn hide(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("overlay") {

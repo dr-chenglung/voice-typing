@@ -40,6 +40,52 @@ body {
   height: 42px;
 }
 
+/* 處理中光圈：繞著底盤外緣旋轉的漸層弧。顏色取自 --accent（一般模式活力橙、翻譯模式藍紫，
+   由 overlay.js 依模式設定）。平時透明，只有 body.processing 時淡入並開始轉。 */
+#spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 90px;
+  height: 90px;
+  margin: -45px 0 0 -45px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, transparent 90deg, var(--accent, #ff9f1c) 330deg, transparent 360deg);
+  /* 挖空中間，只留一圈 4px 寬的環。 */
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3.5px));
+  filter: drop-shadow(0 0 4px var(--accent, #ff9f1c));
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+body.processing #spinner {
+  opacity: 1;
+  animation: spin 0.9s linear infinite;
+}
+
+/* 處理中麥克風緩慢呼吸，與旋轉光圈一起表達「還在跑，不是當掉」。 */
+body.processing #mic {
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* 每個 path 的初始顏色；overlay.js 會隨音量覆寫此 fill。 */
 #mic path {
   fill: #e9e9ef;
