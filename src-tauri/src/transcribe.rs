@@ -1,7 +1,45 @@
 //! STT／LLM 校正呼叫（規格第 5 節）。端點 URL 由呼叫端傳入，預設指向 Groq 的
 //! OpenAI 相容端點，但可在設定視窗改成其他 OpenAI 相容供應商。
 
+use std::time::Duration;
+
 use anyhow::{anyhow, bail, Context, Result};
+
+/// 建立連線（TCP＋TLS 交握）最多等多久。連不上通常幾秒內就會知道，10 秒已很寬鬆。
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// 單一請求從送出到讀完回應的總時限，STT 與 LLM 分開訂（使用者 2026-11-11 指定）。
+/// 沒有這個上限時，伺服器「連上了卻不回應」會讓 controller 執行緒無限期卡在處理中、
+/// 使用者也收不到任何通知。
+/// STT：含上傳整段 WAV 與 Whisper 轉錄，長錄音需要較多時間，故給 30 秒。
+pub const STT_TIMEOUT: Duration = Duration::from_secs(30);
+/// LLM 校正／翻譯：只送文字，正常幾秒內回應，給 20 秒。
+pub const LLM_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// 建立 STT／LLM 共用的 HTTP client。client 只設連線逾時；整體時限因 STT 與 LLM 不同，
+/// 改在各自的請求上用 `RequestBuilder::timeout` 設定（見 `transcribe`／`chat_completion`）。
+pub fn build_client() -> Result<reqwest::Client> {
+    build_client_with(CONNECT_TIMEOUT)
+}
+
+fn build_client_with(connect: Duration) -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .connect_timeout(connect)
+        .build()
+        .context("建立 HTTP client 失敗")
+}
+
+/// 把 reqwest 的錯誤轉成給使用者看的訊息（會出現在系統通知裡），逾時與連不上要講清楚，
+/// 不然通知只會寫「請求送出失敗」，看不出是伺服器沒回應。`timeout` 是這次請求的整體時限，
+/// 只用來寫進訊息。
+fn request_error(label: &str, timeout: Duration, e: reqwest::Error) -> anyhow::Error {
+    if e.is_timeout() {
+        anyhow!("{label}請求逾時：伺服器超過 {} 秒沒有回應", timeout.as_secs_f32())
+    } else if e.is_connect() {
+        anyhow!("{label}無法連線到伺服器，請檢查網路或 API URL：{e}")
+    } else {
+        anyhow!("{label}請求失敗（網路）：{e}")
+    }
+}
 
 /// 校正用系統提示（基底）。關鍵：把使用者訊息一律當「要校正的逐字稿」，絕不回答或執行其中內容；
 /// 一律輸出繁體中文；只做最小幅度清理；只輸出校正後文字本身。
@@ -317,11 +355,16 @@ pub async fn transcribe(
         .post(api_url)
         .bearer_auth(api_key)
         .multipart(form)
+        .timeout(STT_TIMEOUT)
         .send()
         .await
-        .context("STT 請求送出失敗（網路）")?;
+        .map_err(|e| request_error("STT ", STT_TIMEOUT, e))?;
     let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
+    // 讀回應內容也可能逾時（標頭回來了、內容卡住），不能吞成空字串，否則會被誤當成「辨識結果為空」。
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| request_error("STT ", STT_TIMEOUT, e))?;
     if !status.is_success() {
         bail!("STT 失敗（{status}）: {body}");
     }
@@ -343,7 +386,8 @@ pub async fn transcribe(
 
 /// `correct()` 與 `translate()` 共用的 chat completions 呼叫：組 payload、送出、檢查狀態碼、
 /// 解析 JSON 取出 `choices[0].message.content`。`label` 只用於組錯誤訊息（如「校正」「翻譯」），
-/// 不影響請求內容。
+/// 不影響請求內容。`timeout` 為這次請求的整體時限（正式呼叫一律傳 `LLM_TIMEOUT`，
+/// 參數化是為了讓測試能用很短的時限）。
 async fn chat_completion(
     client: &reqwest::Client,
     api_key: &str,
@@ -352,6 +396,7 @@ async fn chat_completion(
     system_prompt: &str,
     user_content: &str,
     label: &str,
+    timeout: Duration,
 ) -> Result<String> {
     let payload = serde_json::json!({
         "model": model,
@@ -366,11 +411,15 @@ async fn chat_completion(
         .post(api_url)
         .bearer_auth(api_key)
         .json(&payload)
+        .timeout(timeout)
         .send()
         .await
-        .with_context(|| format!("{label}請求送出失敗（網路）"))?;
+        .map_err(|e| request_error(label, timeout, e))?;
     let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| request_error(label, timeout, e))?;
     if !status.is_success() {
         bail!("{label} API 失敗（{status}）: {body}");
     }
@@ -410,7 +459,10 @@ pub async fn correct(
 [逐字稿開始]\n{text}\n[逐字稿結束]"
     );
     let system_prompt = build_system_prompt(vocabulary, formatting);
-    chat_completion(client, api_key, api_url, model, &system_prompt, &user_content, "校正").await
+    chat_completion(
+        client, api_key, api_url, model, &system_prompt, &user_content, "校正", LLM_TIMEOUT,
+    )
+    .await
 }
 
 /// 翻譯輸出。失敗時由呼叫端降級為輸出原始文字（比照 `correct()` 的降級規則，見 controller）。
@@ -437,12 +489,55 @@ pub async fn translate(
 [逐字稿開始]\n{text}\n[逐字稿結束]"
     );
     let system_prompt = build_translate_system_prompt(target_language, vocabulary, formatting);
-    chat_completion(client, api_key, api_url, model, &system_prompt, &user_content, "翻譯").await
+    chat_completion(
+        client, api_key, api_url, model, &system_prompt, &user_content, "翻譯", LLM_TIMEOUT,
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 伺服器接受連線卻永遠不回應時，請求必須在時限內以「逾時」錯誤結束，而不是無限期等待。
+    #[test]
+    fn unresponsive_server_times_out_with_clear_message() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        // 接受連線後抓著不放、一個位元組都不回。
+        std::thread::spawn(move || {
+            let _held: Vec<_> = listener.incoming().take(1).collect();
+            std::thread::sleep(Duration::from_secs(10));
+        });
+
+        let client = build_client_with(Duration::from_secs(2)).unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let started = std::time::Instant::now();
+        let err = rt
+            .block_on(chat_completion(
+                &client,
+                "key",
+                &format!("http://{addr}/v1/chat/completions"),
+                "model",
+                "sys",
+                "hi",
+                "校正",
+                Duration::from_millis(300),
+            ))
+            .unwrap_err();
+
+        assert!(started.elapsed() < Duration::from_secs(5), "應在時限內結束");
+        let msg = err.to_string();
+        assert!(msg.contains("校正請求逾時"), "錯誤訊息應說明逾時，實際為：{msg}");
+        assert!(msg.contains("0.3 秒"), "錯誤訊息應寫出本次時限，實際為：{msg}");
+    }
+
+    /// 釘住使用者指定的時限：STT 30 秒、LLM 20 秒，避免日後被無意間改掉。
+    #[test]
+    fn timeouts_match_the_values_chosen_by_the_user() {
+        assert_eq!(STT_TIMEOUT, Duration::from_secs(30));
+        assert_eq!(LLM_TIMEOUT, Duration::from_secs(20));
+    }
 
     #[test]
     fn translate_prompt_includes_target_language() {

@@ -53,7 +53,15 @@ pub fn run(rx: Receiver<()>, app: AppHandle, cfg: Arc<Mutex<Config>>, level: Arc
             return;
         }
     };
-    let client = reqwest::Client::new();
+    // 帶逾時的 client：伺服器不回應時 STT 最多等 transcribe::STT_TIMEOUT、LLM 最多等
+    // transcribe::LLM_TIMEOUT，之後走既有錯誤/降級流程。
+    let client = match transcribe::build_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[controller] {e:#}");
+            return;
+        }
+    };
 
     let mut state = AppState::Idle;
     let mut recorder: Option<Recorder> = None;
@@ -111,6 +119,14 @@ pub fn run(rx: Receiver<()>, app: AppHandle, cfg: Arc<Mutex<Config>>, level: Arc
                         }
                     }
                     Err(e) => flash_error(&app, &e.to_string()),
+                }
+
+                // process() 是同步阻塞的，處理期間按下的熱鍵不會被下方 Processing 分支吃掉，
+                // 而是堆在 channel 裡；不清掉的話，回 Idle 後會被逐一補處理、突然開始一段
+                // 使用者沒預期的錄音。規格要求「處理中不重複觸發」，故這裡全部丟棄。
+                let dropped = rx.try_iter().count();
+                if dropped > 0 {
+                    println!("[controller] 已忽略處理期間按下的 {dropped} 次熱鍵");
                 }
 
                 state = AppState::Idle;
