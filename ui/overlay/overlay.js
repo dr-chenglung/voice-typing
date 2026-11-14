@@ -1,7 +1,7 @@
 // 麥克風圖示疊加視窗。
-// 後端 overlay.rs 用 emit_to("overlay", ...) 送兩種事件：
+// 後端 overlay.rs 用 emit_to(<overlay 視窗 label>, ...) 送三種事件：
 //   - "level"：f32 音量（已做 RMS + 衰減平滑），顯示時每 ~33ms 推一次
-//   - "overlay-show"：每次顯示疊加視窗時送一次，用來重置動畫狀態
+//   - "overlay-show"：每次顯示疊加視窗時送一次，用來重置動畫狀態；收到後回報 "overlay-alive"
 //   - "overlay-processing"：錄音結束、等待 STT／LLM 回傳時送一次，切換成旋轉光圈的「處理中」樣式
 // 用 requestAnimationFrame 對音量做 easing，隨音量驅動：顏色（亮灰→活力橙）、發光、輕微縮放。
 //
@@ -102,5 +102,11 @@ requestAnimationFrame(tick);
 
 const { event } = window.__TAURI__;
 event.listen("level", (e) => pushLevel(e.payload));
-event.listen("overlay-show", (e) => reset(e.payload?.translate));
+event.listen("overlay-show", (e) => {
+  reset(e.payload?.translate);
+  // 看門狗回報：在下一個動畫影格把序號送回後端，證明 JS 與繪製迴圈都還在跑；
+  // 後端沒在時限內收到就會重建這個視窗（見 overlay.rs 檔頭說明）。
+  const seq = e.payload?.seq;
+  if (seq != null) requestAnimationFrame(() => event.emit("overlay-alive", seq));
+});
 event.listen("overlay-processing", () => startProcessing());
