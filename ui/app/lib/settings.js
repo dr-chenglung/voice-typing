@@ -77,3 +77,10 @@ export function styleIdFromFormatting(enabled) {
 export function formattingFromStyleId(id) {
   return id === "builtin-active";
 }
+
+const HOTKEY_LABELS = { right_alt: "右 Alt", right_ctrl: "右 Ctrl" };
+
+/** 熱鍵設定值換成給人看的名稱；不認得的值原樣顯示。 */
+export function hotkeyLabel(id) {
+  return HOTKEY_LABELS[id] ?? id;
+}

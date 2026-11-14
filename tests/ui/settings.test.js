@@ -9,6 +9,7 @@ import {
   STYLES,
   styleIdFromFormatting,
   formattingFromStyleId,
+  hotkeyLabel,
 } from "../../ui/app/lib/settings.js";
 
 const base = {
@@ -65,4 +66,10 @@ test("整理風格與 enable_formatting 互相對應", () => {
 
 test("STYLES 有基本型與積極型兩項，id 固定", () => {
   assert.deepEqual(STYLES.map((s) => s.id), ["builtin-basic", "builtin-active"]);
+});
+
+test("hotkeyLabel 顯示中文名稱，未知的熱鍵原樣顯示", () => {
+  assert.equal(hotkeyLabel("right_alt"), "右 Alt");
+  assert.equal(hotkeyLabel("right_ctrl"), "右 Ctrl");
+  assert.equal(hotkeyLabel("caps_lock"), "caps_lock");
 });
