@@ -10,6 +10,8 @@
 >
 > **2026-07-31 更新**：翻譯輸出的模式判定機制簡化（使用者主動要求回退）：原本 2026-07-30 版本用「第二支翻譯熱鍵」判定模式，改為**單一熱鍵維持不變＋設定視窗開關** `translate_mode_active`（預設關閉）；開啟時，下一次用熱鍵開始的錄音即翻譯，開始錄音當下讀取設定、不需重啟程式。熱鍵可選項因此由 5 種縮回原本的 2 種（右 Alt／右 Ctrl）。詳見 §3.1、§5.4、§7。
 
+> **2026-11-15 更新**：設定視窗與歷史紀錄視窗合併為**多頁面主視窗**（`ui/app/`，使用者主動要求；設計見 `docs/superpowers/specs/2026-11-14-multi-page-app-design.md`，第一階段實作見 `docs/superpowers/plans/2026-11-15-multi-page-phase1.md`）。左側邊欄切換主頁／語音辨識／AI 整理／整理風格／翻譯／個人詞彙／歷史紀錄／一般設定／關於；托盤選單改為「開啟 VoiceTyping／歷史紀錄／結束」。第一階段**不改設定檔格式**，既有 IPC 指令不變，只新增 `get_status`、`get_config_path`、`open_config_folder`。下列里程碑中提到的 `ui/settings/`、`ui/history/` 為當時的實作，現已由 `ui/app/` 取代。
+
 ---
 
 ## 1. 產品概述
@@ -335,14 +337,15 @@ translate_mode_active  = false       # 翻譯模式開關：開啟後下一次�
 |------|------|
 | `main.rs` | 進入點、執行緒接線、Tauri 事件迴圈 |
 | `config.rs` | 設定檔讀取／儲存（`app_config_dir()` 為權威位置，向後相容舊位置） |
-| `commands.rs` | 設定／歷史紀錄視窗用的 IPC commands |
+| `commands.rs` | 主視窗用的 IPC commands（設定、歷史紀錄、設定檔路徑） |
+| `status.rs` | 記錄目前狀態（閒置／錄音中／處理中），狀態改變時推送 `app-status` 事件給主視窗 |
 | `state.rs` | `AppState` 狀態定義；`OutputMode`（一般／翻譯，由開始錄音當下讀取的 `translate_mode_active` 決定） |
 | `hotkey.rs` | `rdev` 單熱鍵 toggle 監聽（翻譯與否改由設定檔 `translate_mode_active` 決定，與熱鍵無關） |
 | `audio.rs` | `cpal` 錄音 + 降取樣 + `hound` 封裝 WAV + 音量輸出 |
 | `transcribe.rs` | Groq STT 與 LLM 校正／翻譯（獨立系統提示） |
 | `controller.rs` | 狀態機協調、管線（依 `OutputMode` 分派一般校正或翻譯）、容錯降級 |
 | `typer.rs` | 剪貼簿貼上輸出（Ctrl+V；失敗退回 `enigo`） |
-| `tray.rs` | 系統列圖示、狀態顯示、選單（設定／歷史紀錄／結束）；閒置 tooltip 附加目前模式 |
+| `tray.rs` | 系統列圖示、狀態顯示、選單（開啟 VoiceTyping／歷史紀錄／結束）、`open_main_window`；閒置 tooltip 附加目前模式 |
 | `overlay.rs` | 麥克風圖示疊加視窗的生命週期管理（顯示／隱藏／定位／NOACTIVATE／一般或翻譯配色） |
 | `history.rs` | 轉錄文字歷史紀錄讀寫（`app_data_dir()/history.json`，含翻譯關聯欄位） |
 | `notify.rs` | 背景執行緒失敗時發 Windows 系統通知（`tauri-plugin-notification`） |
@@ -352,5 +355,4 @@ translate_mode_active  = false       # 翻譯模式開關：開啟後下一次�
 | 目錄 | 職責 |
 |------|------|
 | `ui/overlay/` | 麥克風圖示視窗：canvas 繪製黑色麥克風剪影，隨音量發光＋輕微縮放＋easing |
-| `ui/settings/` | 設定視窗表單，呼叫 `get_config`/`save_config` |
-| `ui/history/` | 歷史紀錄清單與清除按鈕，呼叫 `get_history`/`clear_history` |
+| `ui/app/` | 主視窗（取代原本的設定視窗與歷史紀錄視窗）：左側邊欄切頁，`pages/` 每頁一個模組、`lib/` 放可測的純邏輯；呼叫 `get_config`/`save_config`/`get_history`/`clear_history`/`get_status` |
