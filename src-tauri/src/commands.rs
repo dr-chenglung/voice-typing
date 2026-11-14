@@ -132,7 +132,7 @@ pub fn get_history(app: AppHandle) -> Vec<HistoryEntry> {
 #[tauri::command]
 pub fn clear_history(app: AppHandle) -> Result<(), String> {
     history::clear(&app).map_err(|e| e.to_string())?;
-    let _ = app.emit_to("history", "history-cleared", ());
+    let _ = app.emit_to(crate::tray::MAIN_WINDOW, "history-cleared", ());
     Ok(())
 }
 

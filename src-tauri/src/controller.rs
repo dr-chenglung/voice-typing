@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{bail, Result};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use crate::audio::{self, Recorder};
 use crate::config::Config;
@@ -20,7 +20,7 @@ use crate::sound;
 use crate::state::{AppState, OutputMode};
 use crate::transcribe;
 use crate::typer;
-use crate::{overlay, tray};
+use crate::{overlay, status, tray};
 
 /// `process()` 的輸出：最終要打字輸出的文字，以及供歷史紀錄使用的翻譯中繼資訊。
 struct Output {
@@ -116,6 +116,7 @@ pub fn run(rx: Receiver<()>, app: AppHandle, cfg: Arc<Mutex<Config>>, level: Arc
                                 &out.target_language,
                                 &out.source_text,
                             );
+                            let _ = app.emit_to(tray::MAIN_WINDOW, "history-updated", ());
                         }
                     }
                     Err(e) => flash_error(&app, &e.to_string()),
@@ -154,14 +155,17 @@ fn set_state(app: &AppHandle, state: AppState, session_mode: OutputMode, cfg: &A
             };
             tray::set_idle_tooltip(app, translate_mode_active, &target_language);
             overlay::hide(app);
+            status::publish(app, state);
         }
         AppState::Recording => {
             tray::set_state(app, state);
             overlay::show(app, session_mode == OutputMode::Translate);
+            status::publish(app, state);
         }
         AppState::Processing => {
             tray::set_state(app, state);
             overlay::processing(app);
+            status::publish(app, state);
         }
     }
 }

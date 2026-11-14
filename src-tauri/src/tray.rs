@@ -10,6 +10,9 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, Wry};
 
 use crate::state::AppState;
 
+/// 主視窗（側邊欄多頁面）的視窗標籤；主視窗開啟與事件推送都用這個名稱。
+pub const MAIN_WINDOW: &str = "app";
+
 const QUIT_ID: &str = "quit";
 const SETTINGS_ID: &str = "settings";
 const HISTORY_ID: &str = "history";

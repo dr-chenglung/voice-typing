@@ -19,6 +19,7 @@ mod notify;
 mod overlay;
 mod sound;
 mod state;
+mod status;
 mod transcribe;
 mod tray;
 mod typer;
@@ -57,6 +58,7 @@ fn main() {
             commands::save_config,
             commands::get_history,
             commands::clear_history,
+            status::get_status,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -99,6 +101,7 @@ fn main() {
             let initial_target_language = cfg.target_language.clone();
             let cfg_shared = Arc::new(Mutex::new(cfg));
             app.manage(cfg_shared.clone());
+            app.manage(status::CurrentStatus::new());
 
             // 托盤與疊加視窗必須在主執行緒建立（setup hook 保證在主執行緒執行）。
             tray::build(&handle)?;
