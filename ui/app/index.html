@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>VoiceTyping</title>
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+<div id="layout">
+  <aside id="sidebar">
+    <div id="brand">VoiceTyping</div>
+    <nav id="nav">
+      <div id="nav-main"></div>
+      <div id="nav-footer"></div>
+    </nav>
+    <div id="status-bar">
+      <span id="status-dot" class="state-idle"></span>
+      <span id="status-text">閒置</span>
+    </div>
+  </aside>
+  <main id="content"></main>
+</div>
+
+<div id="confirm-dialog" class="dialog-backdrop" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-message">
+    <p id="confirm-message"></p>
+    <div class="dialog-actions">
+      <button type="button" id="confirm-cancel" class="secondary">取消</button>
+      <button type="button" id="confirm-ok">確定</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
