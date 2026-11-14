@@ -95,9 +95,9 @@ export async function load(sec, context) {
     const refresh = () => {
       if (section && !section.hidden) draw().catch(() => {});
     };
-    await api.listen("app-status", refresh);
-    await api.listen("history-updated", refresh);
-    await api.listen("history-cleared", refresh);
+    await api.listenSafely("app-status", refresh);
+    await api.listenSafely("history-updated", refresh);
+    await api.listenSafely("history-cleared", refresh);
   }
 }
 

@@ -8,6 +8,18 @@ const tauri = () => window.__TAURI__;
 export const invoke = (cmd, args) => tauri().core.invoke(cmd, args);
 export const listen = (name, handler) => tauri().event.listen(name, handler);
 
+/**
+ * 註冊事件監聽，失敗只記錄、不往外丟。事件只負責「即時更新」，少了它頁面仍然可以使用；
+ * 如果讓它丟出去，頁面載入流程會中斷，使用者只會看到一片空白。
+ */
+export async function listenSafely(name, handler) {
+  try {
+    await listen(name, handler);
+  } catch (err) {
+    console.error(`註冊事件 ${name} 失敗：`, err);
+  }
+}
+
 export const getConfig = () => invoke("get_config");
 
 /**

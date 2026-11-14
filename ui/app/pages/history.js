@@ -86,8 +86,17 @@ export async function load(sec, context) {
   section.querySelector("#history_list").addEventListener("click", onListClick);
   section.querySelector("#history_clear").addEventListener("click", async () => {
     if (!(await ctx.confirm("確定要清除全部歷史紀錄嗎？此動作無法復原。"))) return;
-    await api.clearHistory();
-    await refresh();
+    const status = section.querySelector(".status-text");
+    status.textContent = "";
+    status.classList.remove("error");
+    try {
+      await api.clearHistory();
+      await refresh();
+    } catch (err) {
+      // 失敗時清單維持原樣，並讓使用者看到原因。
+      status.textContent = `清除失敗：${err}`;
+      status.classList.add("error");
+    }
   });
   await refresh();
   if (!listening) {
@@ -95,8 +104,8 @@ export async function load(sec, context) {
     const onChange = () => {
       if (section && !section.hidden) refresh().catch(() => {});
     };
-    await api.listen("history-updated", onChange);
-    await api.listen("history-cleared", onChange);
+    await api.listenSafely("history-updated", onChange);
+    await api.listenSafely("history-cleared", onChange);
   }
 }
 

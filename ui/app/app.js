@@ -141,11 +141,11 @@ async function init() {
   } catch {
     renderStatusBar();
   }
-  await api.listen("app-status", (ev) => {
+  await api.listenSafely("app-status", (ev) => {
     currentState = ev.payload.state;
     renderStatusBar();
   });
-  await api.listen("navigate", (ev) => router.go(String(ev.payload)));
+  await api.listenSafely("navigate", (ev) => router.go(String(ev.payload)));
 
   // Rust 開啟視窗時若指定了頁面，會注入 window.__INITIAL_PAGE__，優先於網址 hash。
   const initial = window.__INITIAL_PAGE__ ? `#${window.__INITIAL_PAGE__}` : location.hash;
