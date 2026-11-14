@@ -1,6 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { UPDATE_KEYS, mergeUpdate } from "../../ui/app/lib/settings.js";
+import {
+  UPDATE_KEYS,
+  mergeUpdate,
+  PRESET_LANGUAGES,
+  languageSelection,
+  resolveTargetLanguage,
+  STYLES,
+  styleIdFromFormatting,
+  formattingFromStyleId,
+} from "../../ui/app/lib/settings.js";
 
 const base = {
   stt_api_key: "k1", stt_api_url: "u", stt_model: "m", llm_api_key: "k2",
@@ -28,3 +37,32 @@ test("mergeUpdate 不修改傳入的 current", () => {
 });
 
 test("UPDATE_KEYS 恰為 12 個欄位", () => assert.equal(UPDATE_KEYS.length, 12));
+
+test("languageSelection 區分清單內與自訂語言", () => {
+  assert.deepEqual(languageSelection("Japanese"), { select: "Japanese", custom: "" });
+  assert.deepEqual(languageSelection("French"), { select: "__custom__", custom: "French" });
+});
+
+test("resolveTargetLanguage 自訂時取修剪後的輸入", () => {
+  assert.equal(resolveTargetLanguage("__custom__", "  French "), "French");
+  assert.equal(resolveTargetLanguage("Korean", "ignored"), "Korean");
+  assert.equal(resolveTargetLanguage("__custom__", "   "), "");
+});
+
+test("PRESET_LANGUAGES 與舊設定視窗的清單相同", () => {
+  assert.deepEqual(PRESET_LANGUAGES, [
+    "English", "Japanese", "Korean", "Simplified Chinese",
+    "Traditional Chinese", "Spanish", "Vietnamese",
+  ]);
+});
+
+test("整理風格與 enable_formatting 互相對應", () => {
+  assert.equal(styleIdFromFormatting(true), "builtin-active");
+  assert.equal(styleIdFromFormatting(false), "builtin-basic");
+  assert.equal(formattingFromStyleId("builtin-active"), true);
+  assert.equal(formattingFromStyleId("builtin-basic"), false);
+});
+
+test("STYLES 有基本型與積極型兩項，id 固定", () => {
+  assert.deepEqual(STYLES.map((s) => s.id), ["builtin-basic", "builtin-active"]);
+});

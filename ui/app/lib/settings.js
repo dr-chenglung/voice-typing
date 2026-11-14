@@ -29,3 +29,51 @@ export function mergeUpdate(current, partial) {
   }
   return out;
 }
+
+/** 翻譯目標語言的常用選項（英文語言名稱，直接送進翻譯提示詞），與舊設定視窗的清單相同。 */
+export const PRESET_LANGUAGES = [
+  "English",
+  "Japanese",
+  "Korean",
+  "Simplified Chinese",
+  "Traditional Chinese",
+  "Spanish",
+  "Vietnamese",
+];
+
+/** 把存檔裡的目標語言換算成下拉選單要選哪一項；不在常用清單內就選「自訂」。 */
+export function languageSelection(target) {
+  return PRESET_LANGUAGES.includes(target)
+    ? { select: target, custom: "" }
+    : { select: "__custom__", custom: target };
+}
+
+/** 下拉選單與自訂輸入框換算回要存的語言；選「自訂」時取修剪後的輸入。 */
+export function resolveTargetLanguage(select, custom) {
+  return select === "__custom__" ? custom.trim() : select;
+}
+
+/**
+ * 整理風格。第一階段只有內建的兩種，對應舊的 enable_formatting 開關：
+ * 基本型＝關閉智慧排版，積極型＝開啟。自訂風格留到第三階段。
+ */
+export const STYLES = [
+  {
+    id: "builtin-basic",
+    name: "基本型",
+    description: "輕度清理：去贅詞、補標點、修正錯字，不分段、不條列。",
+  },
+  {
+    id: "builtin-active",
+    name: "積極型",
+    description: "基本型加上智慧排版：長內容會分段、條列，允許輕度濃縮。",
+  },
+];
+
+export function styleIdFromFormatting(enabled) {
+  return enabled ? "builtin-active" : "builtin-basic";
+}
+
+export function formattingFromStyleId(id) {
+  return id === "builtin-active";
+}
