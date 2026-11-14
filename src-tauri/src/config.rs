@@ -121,7 +121,7 @@ fn resolve_key(from_cfg: &str, label: &str) -> Result<String> {
     bail!("找不到{label} API key：請在設定視窗填入");
 }
 
-fn config_path(app: &AppHandle) -> Result<PathBuf> {
+pub fn config_path(app: &AppHandle) -> Result<PathBuf> {
     let dir = app
         .path()
         .app_config_dir()

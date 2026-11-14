@@ -6,7 +6,7 @@
 use tauri::image::Image;
 use tauri::menu::MenuBuilder;
 use tauri::tray::{TrayIcon, TrayIconBuilder};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, Wry};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Wry};
 
 use crate::state::AppState;
 
@@ -14,17 +14,31 @@ use crate::state::AppState;
 pub const MAIN_WINDOW: &str = "app";
 
 const QUIT_ID: &str = "quit";
-const SETTINGS_ID: &str = "settings";
+const OPEN_ID: &str = "open";
 const HISTORY_ID: &str = "history";
+
+/// 主視窗的頁面 id，順序必須與前端 `ui/app/lib/router.js` 的 `PAGES` 相同（有測試釘住）。
+/// 只有在這份清單裡的 id 才會被注入前端，避免把任意字串寫進 `initialization_script`。
+const PAGE_IDS: [&str; 9] = [
+    "home",
+    "stt",
+    "llm",
+    "style",
+    "translate",
+    "vocabulary",
+    "history",
+    "general",
+    "about",
+];
 
 struct TrayHandle(TrayIcon<Wry>);
 
 /// 建立托盤（預設 Idle 灰圖），存進 Tauri managed state 供 set_state/set_error 取用。
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let menu = MenuBuilder::new(app)
-        .text(SETTINGS_ID, "設定 Settings")
-        .text(HISTORY_ID, "歷史紀錄 History")
-        .text(QUIT_ID, "結束 Quit")
+        .text(OPEN_ID, "開啟 VoiceTyping")
+        .text(HISTORY_ID, "歷史紀錄")
+        .text(QUIT_ID, "結束")
         .build()?;
 
     let tray = TrayIconBuilder::new()
@@ -34,10 +48,10 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| {
             if event.id() == QUIT_ID {
                 app.exit(0);
-            } else if event.id() == SETTINGS_ID {
-                open_settings_window(app);
+            } else if event.id() == OPEN_ID {
+                open_main_window(app, None);
             } else if event.id() == HISTORY_ID {
-                open_history_window(app);
+                open_main_window(app, Some("history"));
             }
         })
         .build(app)?;
@@ -46,47 +60,46 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// 開啟設定視窗；若已開著則只是把它帶到前景，不會開出第二個。
-fn open_settings_window(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window(SETTINGS_ID) {
+/// 回傳要注入前端的腳本，讓主視窗一開啟就停在指定頁面。
+/// 只接受 `PAGE_IDS` 內的 id，其他一律回 `None`。
+fn initial_page_script(page: &str) -> Option<String> {
+    PAGE_IDS
+        .contains(&page)
+        .then(|| format!(r#"window.__INITIAL_PAGE__ = "{page}";"#))
+}
+
+/// 開啟主視窗；若已開著則只是把它帶到前景，不會開出第二個。
+/// 有指定 `page` 時：視窗已存在就送 `navigate` 事件讓前端切頁（前端有未存修改時會先確認），
+/// 視窗還不存在就用 `initialization_script` 讓它一開啟就停在那一頁。
+pub fn open_main_window(app: &AppHandle, page: Option<&str>) {
+    if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
+        if w.is_minimized().unwrap_or(false) {
+            let _ = w.unminimize();
+        }
+        let _ = w.show();
         let _ = w.set_focus();
+        if let Some(page) = page {
+            let _ = app.emit_to(MAIN_WINDOW, "navigate", page);
+        }
         return;
     }
     // additional_browser_args 必須與其他視窗（尤其 overlay）一致，否則 WebView2 環境建立失敗、
     // 視窗開不出來（見 main.rs 的 WEBVIEW_ARGS 說明）。build 錯誤要印出來，不可靜默吞掉。
-    if let Err(e) = WebviewWindowBuilder::new(
+    let mut builder = WebviewWindowBuilder::new(
         app,
-        SETTINGS_ID,
-        WebviewUrl::App("settings/index.html".into()),
+        MAIN_WINDOW,
+        WebviewUrl::App("app/index.html".into()),
     )
-    .title("設定 Settings")
-    .inner_size(760.0, 700.0)
-    .resizable(false)
-    .additional_browser_args(crate::WEBVIEW_ARGS)
-    .build()
-    {
-        eprintln!("[tray] 開啟設定視窗失敗: {e}");
+    .title("VoiceTyping")
+    .inner_size(960.0, 640.0)
+    .min_inner_size(820.0, 560.0)
+    .resizable(true)
+    .additional_browser_args(crate::WEBVIEW_ARGS);
+    if let Some(script) = page.and_then(initial_page_script) {
+        builder = builder.initialization_script(script);
     }
-}
-
-/// 開啟歷史紀錄視窗；若已開著則只是把它帶到前景，不會開出第二個。
-fn open_history_window(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window(HISTORY_ID) {
-        let _ = w.set_focus();
-        return;
-    }
-    // 同 open_settings_window：參數必須與其他視窗一致，build 錯誤要印出來。
-    if let Err(e) = WebviewWindowBuilder::new(
-        app,
-        HISTORY_ID,
-        WebviewUrl::App("history/index.html".into()),
-    )
-    .title("歷史紀錄 History")
-    .inner_size(480.0, 600.0)
-    .additional_browser_args(crate::WEBVIEW_ARGS)
-    .build()
-    {
-        eprintln!("[tray] 開啟歷史紀錄視窗失敗: {e}");
+    if let Err(e) = builder.build() {
+        eprintln!("[tray] 開啟主視窗失敗: {e}");
     }
 }
 
@@ -246,4 +259,31 @@ fn mic_shape_covers(x: f32, y: f32, canvas: f32) -> bool {
 
 fn dist(x: f32, y: f32, cx: f32, cy: f32) -> f32 {
     ((x - cx) * (x - cx) + (y - cy) * (y - cy)).sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn initial_page_script_accepts_known_page() {
+        assert_eq!(
+            initial_page_script("history").as_deref(),
+            Some(r#"window.__INITIAL_PAGE__ = "history";"#)
+        );
+    }
+
+    #[test]
+    fn initial_page_script_rejects_unknown_or_injected_page() {
+        assert_eq!(initial_page_script("nope"), None);
+        assert_eq!(initial_page_script(r#"x"; alert(1); ""#), None);
+    }
+
+    #[test]
+    fn page_ids_match_frontend_order() {
+        assert_eq!(
+            PAGE_IDS,
+            ["home", "stt", "llm", "style", "translate", "vocabulary", "history", "general", "about"]
+        );
+    }
 }

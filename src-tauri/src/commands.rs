@@ -136,6 +136,27 @@ pub fn clear_history(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 設定檔的完整路徑，一般設定頁顯示用。
+#[tauri::command]
+pub fn get_config_path(app: AppHandle) -> Result<String, String> {
+    crate::config::config_path(&app)
+        .map(|p| p.display().to_string())
+        .map_err(|e| e.to_string())
+}
+
+/// 用檔案總管開啟設定檔所在的資料夾，方便備份。資料夾還不存在時先建立。
+#[tauri::command]
+pub fn open_config_folder(app: AppHandle) -> Result<(), String> {
+    let path = crate::config::config_path(&app).map_err(|e| e.to_string())?;
+    let dir = path.parent().ok_or("無法取得設定資料夾")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    std::process::Command::new("explorer")
+        .arg(dir)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

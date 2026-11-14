@@ -58,6 +58,8 @@ fn main() {
             commands::save_config,
             commands::get_history,
             commands::clear_history,
+            commands::get_config_path,
+            commands::open_config_folder,
             status::get_status,
         ])
         .setup(move |app| {
@@ -94,7 +96,7 @@ fn main() {
                 cfg.llm_model,
                 if cfg.enable_correction { "開啟" } else { "關閉" }
             );
-            println!("常駐系統托盤；於托盤選單按「設定」可調整、按「結束」可離開。");
+            println!("常駐系統托盤；於托盤選單按「開啟 VoiceTyping」可調整設定、按「結束」可離開。");
             println!("===============================================");
 
             let initial_translate_mode = cfg.translate_mode_active;
