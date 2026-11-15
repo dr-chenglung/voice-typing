@@ -260,14 +260,39 @@ fn build_system_prompt(vocabulary: &str, formatting: bool) -> String {
     let mut prompt = BASE_SYSTEM_PROMPT.to_string();
     let vocabulary = vocabulary.trim();
     if !vocabulary.is_empty() {
-        prompt.push_str(&format!(
-            "\n\n11. 【個人詞彙表輔助】使用者提供了自己常用的專有名詞清單，若逐字稿中出現讀音相近但拼寫/用字錯誤的詞\n\
-（含被音譯成中文的英文術語），請修正為詞彙表中的正確寫法；詞彙表僅供比對拼字之用，與詞彙表無關的內容不要因為它而硬套進去：\n\
-[詞彙表開始]\n{vocabulary}\n[詞彙表結束]"
-        ));
+        prompt.push_str("\n\n11. ");
+        prompt.push_str(&vocabulary_block(vocabulary));
     }
     if formatting {
         prompt.push_str(FORMATTING_ADDENDUM);
+    }
+    prompt
+}
+
+/// 個人詞彙表段落的本文（不含編號與前導空行）。內建風格在前面加上「11. 」；
+/// 自訂風格不加編號，因為使用者自己的提示詞沒有這套編號。
+fn vocabulary_block(vocabulary: &str) -> String {
+    format!(
+        "【個人詞彙表輔助】使用者提供了自己常用的專有名詞清單，若逐字稿中出現讀音相近但拼寫/用字錯誤的詞\n\
+（含被音譯成中文的英文術語），請修正為詞彙表中的正確寫法；詞彙表僅供比對拼字之用，與詞彙表無關的內容不要因為它而硬套進去：\n\
+[詞彙表開始]\n{vocabulary}\n[詞彙表結束]"
+    )
+}
+
+/// 內建風格實際送出的提示詞（不含個人詞彙表段），給設定頁顯示用：
+/// `false`＝基本型，`true`＝積極型（基本型加上智慧排版段）。
+pub fn builtin_prompt(formatting: bool) -> String {
+    build_system_prompt("", formatting)
+}
+
+/// 自訂風格：使用者自己寫的整份提示詞，前後空白去掉後原樣送出；
+/// 個人詞彙表有填（trim 後非空）時，附加在後面（不加編號）。
+pub fn build_custom_system_prompt(custom: &str, vocabulary: &str) -> String {
+    let mut prompt = custom.trim().to_string();
+    let vocabulary = vocabulary.trim();
+    if !vocabulary.is_empty() {
+        prompt.push_str("\n\n");
+        prompt.push_str(&vocabulary_block(vocabulary));
     }
     prompt
 }
@@ -440,6 +465,8 @@ async fn chat_completion(
 /// `vocabulary` 非空時，system prompt 會附加個人詞彙表段落，引導修正音譯/誤辨的專有名詞；
 /// `formatting` 為 true 時，system prompt 會附加智慧排版段落，允許長內容分段/條列並輕度
 /// 濃縮成要點（opt-in，見 `config.rs` 的 `enable_formatting`）。
+/// `custom_prompt` 為 `Some` 時改用使用者自己寫的整份提示詞（此時 `formatting` 不參與）；
+/// 使用者訊息仍用 `[逐字稿開始]`／`[逐字稿結束]` 包起來，不受提示詞內容影響。
 pub async fn correct(
     client: &reqwest::Client,
     api_key: &str,
@@ -448,6 +475,7 @@ pub async fn correct(
     text: &str,
     vocabulary: &str,
     formatting: bool,
+    custom_prompt: Option<&str>,
 ) -> Result<String> {
     // 用 [逐字稿開始]/[逐字稿結束] 把逐字稿包起來：除了讓模型清楚知道範圍邊界，
     // 也進一步避免模型把內容當成指令來回答（防 prompt injection 的第二道防線，
@@ -458,7 +486,10 @@ pub async fn correct(
 \n\
 [逐字稿開始]\n{text}\n[逐字稿結束]"
     );
-    let system_prompt = build_system_prompt(vocabulary, formatting);
+    let system_prompt = match custom_prompt {
+        Some(custom) => build_custom_system_prompt(custom, vocabulary),
+        None => build_system_prompt(vocabulary, formatting),
+    };
     chat_completion(
         client, api_key, api_url, model, &system_prompt, &user_content, "校正", LLM_TIMEOUT,
     )
@@ -583,5 +614,43 @@ mod tests {
     fn translate_prompt_omits_formatting_when_disabled() {
         let prompt = build_translate_system_prompt("English", "", false);
         assert!(!prompt.contains("智慧排版"));
+    }
+
+    // ---- 內建風格的提示詞：改版前後必須逐字相同（characterization） ----
+
+    #[test]
+    fn builtin_basic_prompt_is_the_base_prompt_unchanged() {
+        assert_eq!(builtin_prompt(false), BASE_SYSTEM_PROMPT);
+    }
+
+    #[test]
+    fn builtin_active_prompt_is_base_plus_formatting_addendum() {
+        assert_eq!(
+            builtin_prompt(true),
+            format!("{BASE_SYSTEM_PROMPT}{FORMATTING_ADDENDUM}")
+        );
+    }
+
+    #[test]
+    fn builtin_vocabulary_section_keeps_its_number_11() {
+        let p = build_system_prompt("Tauri, Rust", false);
+        assert!(p.contains("\n\n11. 【個人詞彙表輔助】"));
+        assert!(p.ends_with("[詞彙表開始]\nTauri, Rust\n[詞彙表結束]"));
+    }
+
+    // ---- 自訂風格：使用者自己寫的整份提示詞 ----
+
+    #[test]
+    fn custom_prompt_is_sent_trimmed_and_otherwise_as_written() {
+        assert_eq!(build_custom_system_prompt("  我的提示詞\n", ""), "我的提示詞");
+        assert_eq!(build_custom_system_prompt("我的提示詞", "   \n "), "我的提示詞");
+    }
+
+    #[test]
+    fn custom_prompt_appends_vocabulary_without_numbering() {
+        let p = build_custom_system_prompt("我的提示詞", "Tauri, Rust");
+        assert!(p.starts_with("我的提示詞\n\n【個人詞彙表輔助】"));
+        assert!(!p.contains("11. "));
+        assert!(p.ends_with("[詞彙表開始]\nTauri, Rust\n[詞彙表結束]"));
     }
 }

@@ -234,6 +234,7 @@ fn process_direct(
         &raw,
         &cfg.vocabulary,
         cfg.enable_formatting,
+        None, // Task 2 接上 cfg.active_custom_prompt()
     )) {
         Ok(c) if !c.is_empty() => {
             println!("[corrected] {c}"); // 校正後文字，與上方 [whisper] 對照
