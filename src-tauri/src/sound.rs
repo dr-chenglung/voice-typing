@@ -13,18 +13,20 @@
 
 use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY};
 
-// 溫暖、低沉、不刺耳的內建音（使用者逐一試聽後選定）：開始用 Windows Unlock、
-// 結束用 Windows Logoff（下降感）。音量已在資產階段烤成 20%（PlaySound 無音量參數）。
+// 短促的純音（2026-11-16 起，參考 SayIt 的做法）：開始 880Hz／0.15 秒、結束 660Hz／0.12 秒，
+// 音量 0.2 起、指數衰減到 0.001，兩者一高一低好分辨。刻意做短：筆電的麥克風會把提示音收進錄音，
+// 越短越不容易被當成說話（見 audio.rs 的 START_SKIP_MS）。音量已在資產階段烤好（PlaySound 無音量參數）。
 // 內嵌進執行檔，不依賴系統音效方案或 C:\Windows\Media 檔案是否存在。
+// （2026-07-14 的舊版是 0.47 秒的兩音敲擊聲，保留在 git 歷史與 tag v0.2.3。）
 static START_WAV: &[u8] = include_bytes!("../assets/start.wav");
 static STOP_WAV: &[u8] = include_bytes!("../assets/stop.wav");
 
-/// 錄音開始提示音（Windows Unlock，溫暖上揚）。
+/// 錄音開始提示音（880Hz 短促一聲）。
 pub fn play_start() {
     play(START_WAV);
 }
 
-/// 錄音結束提示音（Windows Logoff，溫暖下降）。
+/// 錄音結束提示音（660Hz 短促一聲，比開始音低）。
 pub fn play_stop() {
     play(STOP_WAV);
 }
@@ -40,5 +42,41 @@ fn play(wav: &'static [u8]) {
             std::ptr::null_mut(),
             SND_MEMORY | SND_ASYNC,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    /// 回傳 (聲道數, 秒數, 峰值 0~1)。
+    fn describe(wav: &[u8]) -> (u16, f32, f32) {
+        let reader = hound::WavReader::new(Cursor::new(wav)).expect("內嵌的提示音必須是合法的 WAV");
+        let spec = reader.spec();
+        let secs = reader.duration() as f32 / spec.sample_rate as f32;
+        let peak = reader
+            .into_samples::<i16>()
+            .map(|s| (s.unwrap() as f32 / 32768.0).abs())
+            .fold(0.0f32, f32::max);
+        (spec.channels, secs, peak)
+    }
+
+    /// 提示音要短：筆電的麥克風會把它收進錄音，越短越不容易干擾「有沒有說話」的判斷
+    /// （參考 SayIt：一聲 0.15 秒）。音量也不能太大聲或太小聲。
+    #[test]
+    fn both_cues_are_short_mono_and_moderate_in_volume() {
+        for (name, wav) in [("start", START_WAV), ("stop", STOP_WAV)] {
+            let (channels, secs, peak) = describe(wav);
+            assert_eq!(channels, 1, "{name} 應為單聲道");
+            assert!(secs > 0.05 && secs <= 0.2, "{name} 長度 {secs:.2}s 應在 0.05~0.2 秒");
+            assert!((0.1..=0.25).contains(&peak), "{name} 峰值 {peak:.2} 應在 0.1~0.25");
+        }
+    }
+
+    /// 開始音要比結束音高：一高一低讓使用者不用看畫面也聽得出是開始還是結束。
+    #[test]
+    fn start_and_stop_cues_are_different_sounds() {
+        assert_ne!(START_WAV, STOP_WAV);
     }
 }
