@@ -6,7 +6,6 @@ use anyhow::{anyhow, bail, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::collections::VecDeque;
 use std::io::Cursor;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 const TARGET_RATE: u32 = 16_000;
@@ -272,11 +271,12 @@ pub struct Recorder {
     stream: cpal::Stream,
     buf: Arc<Mutex<Vec<f32>>>,
     sample_rate: u32,
+    meter: Arc<Meter>,
 }
 
 /// 開始錄音：開啟預設輸入裝置的串流，PCM 持續寫入記憶體 buffer。
-/// `level` 由本函式的音訊 callback 持續更新為當前音量（f32 bits），供波形疊加視窗讀取。
-pub fn start(level: Arc<AtomicU32>) -> Result<Recorder> {
+/// `meter` 由本函式的音訊 callback 持續餵入單聲道樣本，供浮動視窗取波形與警告；開始時先 reset。
+pub fn start(meter: Arc<Meter>) -> Result<Recorder> {
     let host = cpal::default_host();
     let device = host
         .default_input_device()
@@ -289,15 +289,16 @@ pub fn start(level: Arc<AtomicU32>) -> Result<Recorder> {
     let sample_format = supported.sample_format();
     let config: cpal::StreamConfig = supported.into();
 
+    meter.reset(sample_rate);
     let buf = Arc::new(Mutex::new(Vec::<f32>::new()));
     let buf_cb = buf.clone();
-    let level_cb = level.clone();
+    let meter_cb = meter.clone();
     let err_fn = |e| eprintln!("[audio] 串流錯誤: {e}");
 
     let stream = match sample_format {
         cpal::SampleFormat::F32 => device.build_input_stream(
             &config,
-            move |data: &[f32], _: &_| push_mono(&buf_cb, data, channels, &level_cb),
+            move |data: &[f32], _: &_| push_mono(&buf_cb, data, channels, &meter_cb),
             err_fn,
             None,
         ),
@@ -305,7 +306,7 @@ pub fn start(level: Arc<AtomicU32>) -> Result<Recorder> {
             &config,
             move |data: &[i16], _: &_| {
                 let f: Vec<f32> = data.iter().map(|&s| s as f32 / 32768.0).collect();
-                push_mono(&buf_cb, &f, channels, &level_cb);
+                push_mono(&buf_cb, &f, channels, &meter_cb);
             },
             err_fn,
             None,
@@ -314,7 +315,7 @@ pub fn start(level: Arc<AtomicU32>) -> Result<Recorder> {
             &config,
             move |data: &[u16], _: &_| {
                 let f: Vec<f32> = data.iter().map(|&s| (s as f32 - 32768.0) / 32768.0).collect();
-                push_mono(&buf_cb, &f, channels, &level_cb);
+                push_mono(&buf_cb, &f, channels, &meter_cb);
             },
             err_fn,
             None,
@@ -329,6 +330,7 @@ pub fn start(level: Arc<AtomicU32>) -> Result<Recorder> {
         stream,
         buf,
         sample_rate,
+        meter,
     })
 }
 
@@ -343,8 +345,10 @@ impl Recorder {
             stream,
             buf,
             sample_rate,
+            meter,
         } = self;
         drop(stream); // 停止擷取
+        meter.clear(); // 即時音量資料用完即丟
 
         let samples = std::mem::take(&mut *buf.lock().unwrap());
         if samples.is_empty() {
@@ -377,8 +381,8 @@ impl Recorder {
     }
 }
 
-/// 把交錯的多聲道資料混成單聲道後追加到 buffer，並更新當前音量（RMS，含衰減平滑）。
-fn push_mono(buf: &Arc<Mutex<Vec<f32>>>, data: &[f32], channels: usize, level: &AtomicU32) {
+/// 把交錯的多聲道資料混成單聲道後追加到 buffer，同時餵給即時音量計。
+fn push_mono(buf: &Arc<Mutex<Vec<f32>>>, data: &[f32], channels: usize, meter: &Meter) {
     let mut b = buf.lock().unwrap();
     let start = b.len();
     if channels <= 1 {
@@ -389,15 +393,7 @@ fn push_mono(buf: &Arc<Mutex<Vec<f32>>>, data: &[f32], channels: usize, level: &
             b.push(sum / channels as f32);
         }
     }
-    // 以本批新樣本算 RMS，再與前值取衰減最大值，讓波形不會瞬間歸零。
-    let new = &b[start..];
-    if !new.is_empty() {
-        let sum_sq: f32 = new.iter().map(|s| s * s).sum();
-        let rms = (sum_sq / new.len() as f32).sqrt();
-        let prev = f32::from_bits(level.load(Ordering::Relaxed));
-        let smoothed = rms.max(prev * 0.80);
-        level.store(smoothed.to_bits(), Ordering::Relaxed);
-    }
+    meter.push(&b[start..]);
 }
 
 /// 線性內插降/升取樣。MVP 用簡單內插即可（規格未要求高品質重採樣）。

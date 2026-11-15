@@ -4,7 +4,6 @@
 //! 網路請求用內建的 tokio runtime 以 block_on 執行；本執行緒即「背景工作執行緒」，
 //! 不會阻塞熱鍵監聽或主執行緒（托盤/overlay）。
 
-use std::sync::atomic::AtomicU32;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -42,7 +41,7 @@ impl Output {
     }
 }
 
-pub fn run(rx: Receiver<()>, app: AppHandle, cfg: Arc<Mutex<Config>>, level: Arc<AtomicU32>) {
+pub fn run(rx: Receiver<()>, app: AppHandle, cfg: Arc<Mutex<Config>>, meter: Arc<audio::Meter>) {
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -79,7 +78,7 @@ pub fn run(rx: Receiver<()>, app: AppHandle, cfg: Arc<Mutex<Config>>, level: Arc
                 } else {
                     OutputMode::Direct
                 };
-                match audio::start(level.clone()) {
+                match audio::start(meter.clone()) {
                     Ok(r) => {
                         recorder = Some(r);
                         session_mode = mode;

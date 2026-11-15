@@ -24,7 +24,6 @@ mod transcribe;
 mod tray;
 mod typer;
 
-use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
@@ -46,8 +45,8 @@ pub(crate) const WEBVIEW_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,ms
     --disable-renderer-backgrounding";
 
 fn main() {
-    // 麥克風即時音量（f32 bits），由音訊執行緒寫入、overlay 視窗讀取。
-    let level = Arc::new(AtomicU32::new(0));
+    // 麥克風即時音量計（24 段波形＋警告），由音訊執行緒餵入、overlay 視窗讀取；只存在記憶體。
+    let meter = Arc::new(audio::Meter::new());
     // 熱鍵執行緒 → controller 執行緒 的 toggle 訊號。
     let (tx, rx) = std::sync::mpsc::channel::<()>();
 
@@ -110,15 +109,15 @@ fn main() {
             // 托盤與疊加視窗必須在主執行緒建立（setup hook 保證在主執行緒執行）。
             tray::build(&handle)?;
             tray::set_idle_tooltip(&handle, initial_translate_mode, &initial_target_language);
-            overlay::create_window(&handle, level.clone())?;
+            overlay::create_window(&handle, meter.clone())?;
 
             // 熱鍵監聽執行緒。
             std::thread::spawn(move || hotkey::run(hotkey, tx));
 
             // controller 執行緒（管理錄音 + 管線）。
             let ctrl_handle = handle.clone();
-            let ctrl_level = level.clone();
-            std::thread::spawn(move || controller::run(rx, ctrl_handle, cfg_shared, ctrl_level));
+            let ctrl_meter = meter.clone();
+            std::thread::spawn(move || controller::run(rx, ctrl_handle, cfg_shared, ctrl_meter));
 
             Ok(())
         })

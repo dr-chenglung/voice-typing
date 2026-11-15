@@ -1,4 +1,4 @@
-//! 浮動麥克風圖示疊加視窗的生命週期管理（顯示/隱藏/定位/音量推播/失效自動重建）。
+//! 浮動疊加視窗的生命週期管理（顯示/隱藏/定位/波形與警告推播/失效自動重建）。
 //! 圖示本身改由前端 `ui/overlay/overlay.js`（canvas）繪製，這裡只管視窗。
 //!
 //! 視窗特性：
@@ -28,6 +28,7 @@ use std::time::{Duration, Instant};
 use tauri::{
     AppHandle, Emitter, Listener, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder,
 };
+use crate::audio::{LiveWarning, Meter};
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
@@ -37,6 +38,8 @@ const WIN_W: f64 = 112.0; // 比底盤大一圈，留空間給音量發光效果
 const WIN_H: f64 = 112.0;
 const BOTTOM_MARGIN: i32 = 36; // 距螢幕底部
 const TICK: Duration = Duration::from_millis(33); // ~30fps，與舊版 FRAME 一致
+/// 警告判斷比波形慢：每 8 個 tick（約 264ms）才重算一次，其餘沿用上次結果。
+const WARNING_EVERY_TICKS: u32 = 8;
 /// 顯示後等前端回報 `overlay-alive` 的上限；正常情況下幾十毫秒內就會回報，
 /// 放寬到 1.5 秒避免系統忙碌時誤判而無謂重建。
 const ALIVE_TIMEOUT: Duration = Duration::from_millis(1500);
@@ -58,6 +61,8 @@ struct Overlay {
     visible: Arc<AtomicBool>,
     mode: AtomicU8,
     translate: AtomicBool,
+    /// 本次錄音的起點，供失效重建時告訴前端「已經錄了多久」，秒數才不會歸零。
+    started: Mutex<Option<Instant>>,
     /// 每次要求前端回報時遞增的序號，與前端回報的 `alive` 比對。
     show_seq: AtomicU64,
     /// 前端最近一次回報的序號。
@@ -78,11 +83,20 @@ impl Overlay {
 struct OverlayShowPayload {
     translate: bool,
     seq: u64,
+    /// 錄音已經過的毫秒數；一般顯示為 0，失效重建時為實際值。
+    elapsed_ms: u64,
+}
+
+/// meter 事件的 payload：24 段原始 RMS（未正規化）與目前的音量警告。
+#[derive(serde::Serialize, Clone)]
+struct MeterPayload {
+    bars: Vec<f32>,
+    warning: LiveWarning,
 }
 
 /// 在 setup 階段建立隱藏的疊加視窗，並啟動音量推播背景執行緒。
-/// `level` 由音訊執行緒寫入即時音量（f32 bits），與舊版相同。
-pub fn create_window(app: &AppHandle, level: Arc<AtomicU32>) -> tauri::Result<()> {
+/// `meter` 由音訊執行緒餵入樣本；這裡的背景執行緒每 tick 取 24 段波形與警告，以 `meter` 事件推給前端。
+pub fn create_window(app: &AppHandle, meter: Arc<Meter>) -> tauri::Result<()> {
     build_window(app, "overlay")?;
 
     let visible = Arc::new(AtomicBool::new(false));
@@ -93,6 +107,7 @@ pub fn create_window(app: &AppHandle, level: Arc<AtomicU32>) -> tauri::Result<()
         visible: visible.clone(),
         mode: AtomicU8::new(MODE_HIDDEN),
         translate: AtomicBool::new(false),
+        started: Mutex::new(None),
         show_seq: AtomicU64::new(0),
         alive: alive.clone(),
         recreating: AtomicBool::new(false),
@@ -106,15 +121,29 @@ pub fn create_window(app: &AppHandle, level: Arc<AtomicU32>) -> tauri::Result<()
     });
 
     let app_handle = app.clone();
-    std::thread::spawn(move || loop {
-        if visible.load(Ordering::Relaxed) {
-            let raw = f32::from_bits(level.load(Ordering::Relaxed));
-            if let Some(state) = app_handle.try_state::<Overlay>() {
-                let _ = app_handle.emit_to(state.label().as_str(), "level", raw);
+    std::thread::spawn(move || {
+        let mut tick: u32 = 0;
+        let mut warning = LiveWarning::None;
+        loop {
+            if visible.load(Ordering::Relaxed) {
+                // 先在這裡取值（Meter 內部的鎖用完即放），再去 emit，不在持鎖時呼叫 Tauri API。
+                if tick % WARNING_EVERY_TICKS == 0 {
+                    warning = meter.warning();
+                }
+                tick = tick.wrapping_add(1);
+                let payload = MeterPayload {
+                    bars: meter.bars(),
+                    warning,
+                };
+                if let Some(state) = app_handle.try_state::<Overlay>() {
+                    let _ = app_handle.emit_to(state.label().as_str(), "meter", payload);
+                }
+                std::thread::sleep(TICK);
+            } else {
+                tick = 0;
+                warning = LiveWarning::None;
+                std::thread::sleep(Duration::from_millis(200));
             }
-            std::thread::sleep(TICK);
-        } else {
-            std::thread::sleep(Duration::from_millis(200));
         }
     });
 
@@ -152,6 +181,7 @@ pub fn show(app: &AppHandle, translate: bool) {
     };
     state.mode.store(MODE_RECORDING, Ordering::Relaxed);
     state.translate.store(translate, Ordering::Relaxed);
+    *state.started.lock().unwrap() = Some(Instant::now());
     let Some(window) = app.get_webview_window(&state.label()) else {
         return;
     };
@@ -160,7 +190,11 @@ pub fn show(app: &AppHandle, translate: bool) {
     let _ = window.emit_to(
         window.label(),
         "overlay-show",
-        OverlayShowPayload { translate, seq },
+        OverlayShowPayload {
+            translate,
+            seq,
+            elapsed_ms: 0,
+        },
     );
     show_both(&window);
     state.visible.store(true, Ordering::Relaxed);
@@ -200,6 +234,7 @@ pub fn hide(app: &AppHandle) {
     };
     state.visible.store(false, Ordering::Relaxed);
     state.mode.store(MODE_HIDDEN, Ordering::Relaxed);
+    *state.started.lock().unwrap() = None;
     if let Some(window) = app.get_webview_window(&state.label()) {
         let webview: &tauri::Webview = window.as_ref();
         let _ = webview.hide();
@@ -238,7 +273,20 @@ fn recreate(app: &AppHandle) {
     let ok = loop {
         let seq = state.show_seq.fetch_add(1, Ordering::Relaxed) + 1;
         let translate = state.translate.load(Ordering::Relaxed);
-        let _ = window.emit_to(new_label.as_str(), "overlay-show", OverlayShowPayload { translate, seq });
+        let elapsed_ms = state
+            .started
+            .lock()
+            .unwrap()
+            .map_or(0, |t| t.elapsed().as_millis() as u64);
+        let _ = window.emit_to(
+            new_label.as_str(),
+            "overlay-show",
+            OverlayShowPayload {
+                translate,
+                seq,
+                elapsed_ms,
+            },
+        );
         std::thread::sleep(Duration::from_millis(100));
         if state.alive.load(Ordering::Relaxed) >= seq {
             break true;
