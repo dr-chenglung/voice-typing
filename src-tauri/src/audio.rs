@@ -4,6 +4,7 @@
 
 use anyhow::{anyhow, bail, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::collections::VecDeque;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -150,6 +151,120 @@ pub fn live_warning(windows: &[f32]) -> LiveWarning {
         LiveWarning::Low
     } else {
         LiveWarning::None
+    }
+}
+
+/// 浮動視窗波形的條數。
+pub const BAR_COUNT: usize = 24;
+/// 波形取最近多少毫秒的樣本來分段。
+const TAIL_MS: usize = 40;
+
+/// 把樣本平均切成 `n` 段、各算一個 RMS。永遠回傳 `n` 個值；樣本不足時空的段為 0.0。
+pub fn segment_rms(samples: &[f32], n: usize) -> Vec<f32> {
+    let len = samples.len();
+    (0..n)
+        .map(|i| {
+            let seg = &samples[i * len / n..(i + 1) * len / n];
+            if seg.is_empty() {
+                0.0
+            } else {
+                let sum_sq: f32 = seg.iter().map(|s| s * s).sum();
+                (sum_sq / seg.len() as f32).sqrt()
+            }
+        })
+        .collect()
+}
+
+struct MeterInner {
+    /// 一個 `SILENCE_WINDOW_MS` 視窗折合的樣本數（依裝置取樣率）。
+    window_len: usize,
+    /// 尾段最多保留的樣本數（`TAIL_MS` 毫秒份量）。
+    tail_cap: usize,
+    tail: VecDeque<f32>,
+    /// 錄音開始以來每個完整視窗的 RMS。
+    windows: Vec<f32>,
+    /// 還沒湊滿一個視窗的平方和與樣本數。
+    acc_sum_sq: f32,
+    acc_count: usize,
+}
+
+impl MeterInner {
+    fn empty(sample_rate: u32) -> Self {
+        let rate = sample_rate as usize;
+        MeterInner {
+            window_len: (rate * SILENCE_WINDOW_MS / 1000).max(1),
+            tail_cap: (rate * TAIL_MS / 1000).max(1),
+            tail: VecDeque::new(),
+            windows: Vec::new(),
+            acc_sum_sq: 0.0,
+            acc_count: 0,
+        }
+    }
+}
+
+/// 錄音中的即時音量計：音訊 callback 餵樣本進來，浮動視窗取 24 段波形與警告。
+///
+/// 只存在記憶體，`reset`（開始錄音）與 `clear`（停止錄音）都會把樣本清空，
+/// 符合「語音資料用完即丟」的規則。內部用 `Mutex` 保護；呼叫端取值後再去呼叫
+/// Tauri API，不要在持有任何鎖時 emit。
+pub struct Meter {
+    inner: Mutex<MeterInner>,
+}
+
+impl Default for Meter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Meter {
+    pub fn new() -> Self {
+        Meter {
+            inner: Mutex::new(MeterInner::empty(TARGET_RATE)),
+        }
+    }
+
+    /// 開始新一段錄音：清空並依裝置取樣率重算視窗與尾段長度。
+    pub fn reset(&self, sample_rate: u32) {
+        *self.inner.lock().unwrap() = MeterInner::empty(sample_rate);
+    }
+
+    /// 餵入單聲道樣本。
+    pub fn push(&self, mono: &[f32]) {
+        let mut m = self.inner.lock().unwrap();
+        for &s in mono {
+            if m.tail.len() >= m.tail_cap {
+                m.tail.pop_front();
+            }
+            m.tail.push_back(s);
+            m.acc_sum_sq += s * s;
+            m.acc_count += 1;
+            if m.acc_count >= m.window_len {
+                let rms = (m.acc_sum_sq / m.acc_count as f32).sqrt();
+                m.windows.push(rms);
+                m.acc_sum_sq = 0.0;
+                m.acc_count = 0;
+            }
+        }
+    }
+
+    /// 最近約 40ms 的樣本分成 `BAR_COUNT` 段的 RMS（原始值，未正規化）。
+    pub fn bars(&self) -> Vec<f32> {
+        let tail: Vec<f32> = self.inner.lock().unwrap().tail.iter().copied().collect();
+        segment_rms(&tail, BAR_COUNT)
+    }
+
+    /// 目前該顯示的警告。鎖內只複製視窗清單，判斷放到鎖外做。
+    pub fn warning(&self) -> LiveWarning {
+        let windows = self.inner.lock().unwrap().windows.clone();
+        live_warning(&windows)
+    }
+
+    /// 清空所有樣本與視窗（停止錄音時呼叫）。
+    pub fn clear(&self) {
+        let mut m = self.inner.lock().unwrap();
+        let rate = (m.window_len * 1000 / SILENCE_WINDOW_MS) as u32;
+        *m = MeterInner::empty(rate);
     }
 }
 
@@ -539,5 +654,50 @@ mod tests {
                 assert_eq!(warn(&amplified(&base, gain)), v, "gain {gain}");
             }
         }
+    }
+
+    // ---- 即時音量計 Meter ----
+
+    #[test]
+    fn segment_rms_always_returns_n_values() {
+        assert_eq!(segment_rms(&[], 24), vec![0.0; 24]);
+        assert_eq!(segment_rms(&[0.5; 10], 24).len(), 24);
+        let v = segment_rms(&[0.5; 1_000], 24);
+        assert!(v.iter().all(|x| (x - 0.5).abs() < 1e-6));
+    }
+
+    #[test]
+    fn meter_windows_follow_device_sample_rate() {
+        let m = Meter::new();
+        m.reset(44_100);
+        for chunk in vec![0.0f32; 44_100 * 3].chunks(441) {
+            m.push(chunk);
+        }
+        assert_eq!(m.warning(), LiveWarning::Muted); // 3 秒全零，已滿 2 秒
+        m.reset(44_100);
+        for chunk in vec![0.0f32; 44_100].chunks(441) {
+            m.push(chunk);
+        }
+        assert_eq!(m.warning(), LiveWarning::None); // 1 秒，未滿 2 秒
+    }
+
+    #[test]
+    fn meter_bars_reflect_recent_samples_only() {
+        let m = Meter::new();
+        m.reset(48_000);
+        m.push(&vec![0.5; 48_000]);
+        m.push(&vec![0.0; 48_000 * 40 / 1000]); // 剛好一個尾段長度的靜音
+        assert_eq!(m.bars().len(), BAR_COUNT);
+        assert!(m.bars().iter().all(|&b| b < 1e-6));
+    }
+
+    #[test]
+    fn meter_clear_drops_everything() {
+        let m = Meter::new();
+        m.reset(16_000);
+        m.push(&vec![0.3; 16_000 * 3]);
+        m.clear();
+        assert!(m.bars().iter().all(|&b| b == 0.0));
+        assert_eq!(m.warning(), LiveWarning::None);
     }
 }
