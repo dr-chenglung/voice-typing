@@ -13,20 +13,21 @@
 
 use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY};
 
-// 短促的純音（2026-11-16 起，參考 SayIt 的做法）：開始 880Hz／0.15 秒、結束 660Hz／0.12 秒，
-// 音量 0.2 起、指數衰減到 0.001，兩者一高一低好分辨。刻意做短：筆電的麥克風會把提示音收進錄音，
+// 短促的純音（2026-11-16 起，參考 SayIt 的做法，再依使用者要求調得更低沉柔和、帶科技感）：
+// 開始音 480→640Hz 往上滑、0.16 秒；結束音 520→360Hz 往下滑、0.14 秒（SayIt 是固定 880Hz、0.15 秒）。
+// 音量 0.2 起、指數衰減到 0.001，一上一下好分辨，純正弦波不加任何雜質。刻意做短：筆電的麥克風會把提示音收進錄音，
 // 越短越不容易被當成說話（見 audio.rs 的 START_SKIP_MS）。音量已在資產階段烤好（PlaySound 無音量參數）。
 // 內嵌進執行檔，不依賴系統音效方案或 C:\Windows\Media 檔案是否存在。
 // （2026-07-14 的舊版是 0.47 秒的兩音敲擊聲，保留在 git 歷史與 tag v0.2.3。）
 static START_WAV: &[u8] = include_bytes!("../assets/start.wav");
 static STOP_WAV: &[u8] = include_bytes!("../assets/stop.wav");
 
-/// 錄音開始提示音（880Hz 短促一聲）。
+/// 錄音開始提示音（480→640Hz 往上滑的短促一聲）。
 pub fn play_start() {
     play(START_WAV);
 }
 
-/// 錄音結束提示音（660Hz 短促一聲，比開始音低）。
+/// 錄音結束提示音（520→360Hz 往下滑的短促一聲）。
 pub fn play_stop() {
     play(STOP_WAV);
 }
@@ -72,6 +73,32 @@ mod tests {
             assert!(secs > 0.05 && secs <= 0.2, "{name} 長度 {secs:.2}s 應在 0.05~0.2 秒");
             assert!((0.1..=0.25).contains(&peak), "{name} 峰值 {peak:.2} 應在 0.1~0.25");
         }
+    }
+
+    /// 用過零點的次數估計平均頻率（Hz）。提示音是單一純音（可能音高滑動），這樣估就夠準。
+    fn average_frequency(wav: &[u8]) -> f32 {
+        let reader = hound::WavReader::new(Cursor::new(wav)).unwrap();
+        let rate = reader.spec().sample_rate as f32;
+        let samples: Vec<i16> = reader.into_samples::<i16>().map(|s| s.unwrap()).collect();
+        let secs = samples.len() as f32 / rate;
+        let (mut crossings, mut last) = (0u32, 0i16);
+        for &x in samples.iter().filter(|&&x| x != 0) {
+            if last != 0 && (x > 0) != (last > 0) {
+                crossings += 1;
+            }
+            last = x;
+        }
+        crossings as f32 / (2.0 * secs)
+    }
+
+    /// 2026-11-16 使用者要求：比 SayIt 的 880Hz 更低沉柔和、帶一點科技感（音高滑動）。
+    /// 開始音往上滑、結束音往下滑，平均頻率都要低於 800Hz，且開始音比結束音高。
+    #[test]
+    fn cues_are_lower_than_880hz_and_start_is_higher_than_stop() {
+        let (start, stop) = (average_frequency(START_WAV), average_frequency(STOP_WAV));
+        assert!((300.0..800.0).contains(&start), "開始音平均 {start:.0}Hz 應在 300~800Hz");
+        assert!((250.0..800.0).contains(&stop), "結束音平均 {stop:.0}Hz 應在 250~800Hz");
+        assert!(start > stop, "開始音 {start:.0}Hz 應比結束音 {stop:.0}Hz 高");
     }
 
     /// 開始音要比結束音高：一高一低讓使用者不用看畫面也聽得出是開始還是結束。
