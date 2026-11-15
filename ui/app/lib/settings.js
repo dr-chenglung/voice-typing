@@ -1,6 +1,6 @@
 // 設定欄位與合併邏輯（純函式）。
 
-/** Rust 端 `ConfigUpdate` 的 12 個欄位（commands.rs），save_config 要求全部都給。 */
+/** Rust 端 `ConfigUpdate` 的 13 個欄位（commands.rs），save_config 要求全部都給。 */
 export const UPDATE_KEYS = [
   "stt_api_key",
   "stt_api_url",
@@ -12,6 +12,7 @@ export const UPDATE_KEYS = [
   "hotkey",
   "vocabulary",
   "enable_formatting",
+  "use_custom_prompt",
   "target_language",
   "translate_mode_active",
 ];
@@ -54,28 +55,57 @@ export function resolveTargetLanguage(select, custom) {
 }
 
 /**
- * 整理風格。第一階段只有內建的兩種，對應舊的 enable_formatting 開關：
- * 基本型＝關閉智慧排版，積極型＝開啟。自訂風格留到第三階段。
+ * AI 整理風格的四個選項，全部由既有欄位推導，不另存「目前風格」：
+ * - enable_correction：是否交給語言模型整理（關閉＝不使用 AI 整理）
+ * - enable_formatting：積極型（翻譯模式的智慧排版也跟著它，所以只有積極型為 true）
+ * - use_custom_prompt：自訂型（提示詞文字另存於 custom_prompt.txt）
  */
-export const STYLES = [
-  {
-    id: "builtin-basic",
-    name: "基本型",
-    description: "輕度清理：去贅詞、補標點、修正錯字，不分段、不條列。",
-  },
-  {
-    id: "builtin-active",
-    name: "積極型",
-    description: "基本型加上智慧排版：長內容會分段、條列，允許輕度濃縮。",
-  },
+export const STYLE_CHOICES = [
+  { id: "none", name: "不使用 AI 整理", description: "直接輸出辨識原文，不交給語言模型。" },
+  { id: "basic", name: "基本型", description: "輕度校正：去贅詞、補標點、修正錯字，不分段、不條列。" },
+  { id: "active", name: "積極型", description: "基本型加上智慧排版：長內容會分段、條列，允許輕度濃縮。" },
+  { id: "custom", name: "自訂", description: "使用你自己寫的提示詞。" },
 ];
 
-export function styleIdFromFormatting(enabled) {
-  return enabled ? "builtin-active" : "builtin-basic";
+/** 由設定推導目前選的是哪一種風格。 */
+export function styleChoiceFromConfig(cfg) {
+  if (!cfg.enable_correction) return "none";
+  if (cfg.use_custom_prompt) return "custom";
+  return cfg.enable_formatting ? "active" : "basic";
 }
 
-export function formattingFromStyleId(id) {
-  return id === "builtin-active";
+/** 選某種風格時要寫入的三個欄位（與 styleChoiceFromConfig 互為反函式）。 */
+export function configPatchForStyle(choice) {
+  return {
+    enable_correction: choice !== "none",
+    enable_formatting: choice === "active",
+    use_custom_prompt: choice === "custom",
+  };
+}
+
+/** 服務網址的主機名稱（含連接埠），給主頁顯示用；網址不合法就回空字串。 */
+export function endpointHost(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 主頁的「設定提醒」：目前程式規定語音辨識一定要有金鑰（本機服務也要隨便填一個字）；
+ * 整理用的金鑰只有在會用到時（有啟用整理，或翻譯模式開著）才檢查。
+ */
+export function setupWarnings(cfg) {
+  const warnings = [];
+  if (!String(cfg.stt_api_key ?? "").trim()) {
+    warnings.push({ message: "語音辨識 API 還沒有填金鑰", goTo: "stt" });
+  }
+  const llmInUse = cfg.enable_correction || cfg.translate_mode_active;
+  if (llmInUse && !String(cfg.llm_api_key ?? "").trim()) {
+    warnings.push({ message: "AI 整理 API 還沒有填金鑰", goTo: "llm" });
+  }
+  return warnings;
 }
 
 const HOTKEY_LABELS = { right_alt: "右 Alt", right_ctrl: "右 Ctrl" };

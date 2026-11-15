@@ -3,10 +3,10 @@
 
 export const PAGES = [
   { id: "home", label: "主頁" },
-  { id: "stt", label: "語音辨識" },
-  { id: "llm", label: "AI 整理" },
-  { id: "style", label: "整理風格" },
-  { id: "translate", label: "翻譯" },
+  { id: "stt", label: "語音辨識 API" },
+  { id: "llm", label: "AI 整理 API" },
+  { id: "style", label: "AI 整理風格" },
+  { id: "translate", label: "翻譯模式" },
   { id: "vocabulary", label: "個人詞彙" },
   { id: "history", label: "歷史紀錄" },
   { id: "general", label: "一般設定", group: "footer" },

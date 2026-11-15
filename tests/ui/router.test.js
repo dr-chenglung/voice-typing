@@ -49,3 +49,8 @@ test("PAGES 的 id 順序固定", () => {
 test("general 與 about 屬於 footer 群組，其餘沒有群組", () => {
   assert.deepEqual(PAGES.filter((p) => p.group === "footer").map((p) => p.id), ["general", "about"]);
 });
+
+test("PAGES 的顯示名稱", () => {
+  assert.deepEqual(PAGES.map((p) => p.label),
+    ["主頁", "語音辨識 API", "AI 整理 API", "AI 整理風格", "翻譯模式", "個人詞彙", "歷史紀錄", "一般設定", "關於"]);
+});
