@@ -267,11 +267,23 @@ impl Meter {
     }
 }
 
+/// 被丟掉時清空即時音量計。`Recorder` 持有它，所以不論錄音是正常結束（`stop_to_wav`）、
+/// 還是中途失敗被直接丟掉（例如沒設定 STT 金鑰時 `stop_to_wav` 根本沒被呼叫），
+/// 樣本都不會留到下一次錄音——符合「語音資料用完即丟」。
+struct MeterGuard(Arc<Meter>);
+
+impl Drop for MeterGuard {
+    fn drop(&mut self) {
+        self.0.clear();
+    }
+}
+
 pub struct Recorder {
+    // 欄位宣告順序即丟棄順序：先停串流、再清音量計，callback 不會在清空後又塞進樣本。
     stream: cpal::Stream,
     buf: Arc<Mutex<Vec<f32>>>,
     sample_rate: u32,
-    meter: Arc<Meter>,
+    meter: MeterGuard,
 }
 
 /// 開始錄音：開啟預設輸入裝置的串流，PCM 持續寫入記憶體 buffer。
@@ -330,7 +342,7 @@ pub fn start(meter: Arc<Meter>) -> Result<Recorder> {
         stream,
         buf,
         sample_rate,
-        meter,
+        meter: MeterGuard(meter),
     })
 }
 
@@ -348,7 +360,7 @@ impl Recorder {
             meter,
         } = self;
         drop(stream); // 停止擷取
-        meter.clear(); // 即時音量資料用完即丟
+        meter.0.clear(); // 即時音量資料用完即丟（其餘離開路徑由 MeterGuard 的 Drop 負責）
 
         let samples = std::mem::take(&mut *buf.lock().unwrap());
         if samples.is_empty() {
@@ -693,6 +705,21 @@ mod tests {
         m.reset(16_000);
         m.push(&vec![0.3; 16_000 * 3]);
         m.clear();
+        assert!(m.bars().iter().all(|&b| b == 0.0));
+        assert_eq!(m.warning(), LiveWarning::None);
+    }
+
+    /// 錄音提早失敗（例如沒設定 STT 金鑰，`stop_to_wav` 根本沒被呼叫）時，Recorder 直接被丟掉；
+    /// 即時音量計必須跟著清空，不能把最後一段樣本留到下一次錄音。
+    #[test]
+    fn meter_guard_clears_the_meter_when_dropped() {
+        let m = Arc::new(Meter::new());
+        m.reset(16_000);
+        m.push(&vec![0.3; 16_000 * 3]);
+        assert!(m.bars().iter().any(|&b| b > 0.0), "前置：尚未清空時應有樣本");
+        {
+            let _guard = MeterGuard(m.clone());
+        }
         assert!(m.bars().iter().all(|&b| b == 0.0));
         assert_eq!(m.warning(), LiveWarning::None);
     }
