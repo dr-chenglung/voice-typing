@@ -1,5 +1,5 @@
 //! 浮動疊加視窗的生命週期管理（顯示/隱藏/定位/波形與警告推播/失效自動重建）。
-//! 圖示本身改由前端 `ui/overlay/overlay.js`（canvas）繪製，這裡只管視窗。
+//! 膠囊本身（24 根波形條、秒數、音量警告、處理中進度條）由前端 `ui/overlay/` 以 DOM 繪製，這裡只管視窗與推播資料。
 //!
 //! 視窗特性：
 //!   - Tauri 內建：always_on_top、skip_taskbar、transparent、decorations(false)、click-through
@@ -14,7 +14,7 @@
 //! `ICoreWebView2Controller::SetIsVisible(true)`，這是 WebView2 官方的喚醒途徑。
 //!
 //! 失效自動重建（看門狗）：上述喚醒仍不足以涵蓋所有情況——實測連續執行數小時後，仍會出現
-//! 「有提示音、文字照常輸出，但麥克風圖示不出現」，且只有重啟程式才恢復（推測是頁面凍結或
+//! 「有提示音、文字照常輸出，但膠囊不出現」，且只有重啟程式才恢復（推測是頁面凍結或
 //! WebView2 renderer 行程失效，Tauri 不會自動復原）。因此每次顯示時都帶一個序號給前端，前端在
 //! 下一個動畫影格回報 `overlay-alive`（證明 JS 與繪製迴圈都還在跑）；若 `ALIVE_TIMEOUT` 內沒收到
 //! 回報，就判定這個 webview 已失效，建一個新視窗取代它（見 `recreate`）。
@@ -34,8 +34,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
-const WIN_W: f64 = 112.0; // 比底盤大一圈，留空間給音量發光效果的暈開範圍
-const WIN_H: f64 = 112.0;
+const WIN_W: f64 = 320.0; // 容納膠囊與上方的警告泡；固定大小，狀態切換時不需 resize／重新置中
+const WIN_H: f64 = 100.0;
 const BOTTOM_MARGIN: i32 = 36; // 距螢幕底部
 const TICK: Duration = Duration::from_millis(33); // ~30fps，與舊版 FRAME 一致
 /// 警告判斷比波形慢：每 8 個 tick（約 264ms）才重算一次，其餘沿用上次結果。
@@ -173,7 +173,7 @@ fn build_window(app: &AppHandle, label: &str) -> tauri::Result<tauri::WebviewWin
 }
 
 /// 顯示疊加視窗：定位到螢幕底部置中、通知前端重置波形、以不奪焦點方式顯示。
-/// `translate` 為 true 時前端會把麥克風圖示改成翻譯模式的配色（見 ui/overlay/overlay.js）。
+/// `translate` 為 true 時前端會把膠囊改成翻譯模式的配色（藍紫，見 ui/overlay/overlay.js）。
 /// 顯示後啟動看門狗：前端沒在時限內回報就重建視窗（理由見檔頭說明）。
 pub fn show(app: &AppHandle, translate: bool) {
     let Some(state) = app.try_state::<Overlay>() else {
@@ -212,7 +212,7 @@ pub fn show(app: &AppHandle, translate: bool) {
 }
 
 /// 切換為「處理中」樣式：錄音已結束、正在等 STT／LLM 回傳時呼叫。
-/// 視窗維持顯示（錄音時本來就在畫面上），前端改畫旋轉光圈＋麥克風呼吸動畫，
+/// 視窗維持顯示（錄音時本來就在畫面上），前端改畫不確定進度條＋「處理中…」，
 /// 讓處理較久時使用者知道程式仍在運作。同時停止音量推播（此時已無音訊可推）。
 pub fn processing(app: &AppHandle) {
     let Some(state) = app.try_state::<Overlay>() else {

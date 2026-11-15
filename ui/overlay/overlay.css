@@ -6,87 +6,195 @@ body {
   height: 100%;
   background: transparent;
   overflow: hidden;
+  font-family: "Segoe UI", "Microsoft JhengHei UI", system-ui, sans-serif;
 }
 
-#stage {
-  position: relative;
+[hidden] {
+  display: none !important;
+}
+
+/* 模式主色：一般模式活力橙、翻譯模式藍紫（與托盤／歷史紀錄的翻譯配色一致）。 */
+body {
+  --accent: rgb(255, 159, 28);
+  --text: #e9e9ef;
+  --text-dim: #b4b6c2;
+  --surface: rgba(18, 20, 28, 0.86);
+  --border: rgba(255, 255, 255, 0.16);
+}
+
+body.translate {
+  --accent: rgb(139, 140, 255);
+}
+
+/* 視窗固定大小：膠囊貼齊底部置中，警告泡往上長（見 overlay.rs 的 WIN_W／WIN_H）。 */
+#root {
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-bottom: 10px;
 }
 
-/* 半透明圓形底盤：在任何背景下都讓麥克風有對比、看得見。 */
-#stage::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 78px;
-  height: 78px;
-  margin: -39px 0 0 -39px;
-  border-radius: 50%;
-  background: rgba(18, 20, 28, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+#pill {
+  box-sizing: border-box;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  color: var(--text);
+  white-space: nowrap;
 }
 
-/* 麥克風本體：基底為亮灰色（在深色底盤上清楚可見）；顏色由 overlay.js 隨音量直接設在 path 上。 */
+#pill.enter {
+  animation: enter 150ms ease-out;
+}
+
 #mic {
-  position: relative;
-  z-index: 1;
-  width: 42px;
-  height: 42px;
+  width: 14px;
+  height: 14px;
+  flex: none;
 }
 
-/* 處理中光圈：繞著底盤外緣旋轉的漸層弧。顏色取自 --accent（一般模式活力橙、翻譯模式藍紫，
-   由 overlay.js 依模式設定）。平時透明，只有 body.processing 時淡入並開始轉。 */
-#spinner {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 90px;
-  height: 90px;
-  margin: -45px 0 0 -45px;
-  border-radius: 50%;
-  background: conic-gradient(from 0deg, transparent 0deg, transparent 90deg, var(--accent, #ff9f1c) 330deg, transparent 360deg);
-  /* 挖空中間，只留一圈 4px 寬的環。 */
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3.5px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3.5px));
-  filter: drop-shadow(0 0 4px var(--accent, #ff9f1c));
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  pointer-events: none;
-}
-
-body.processing #spinner {
-  opacity: 1;
-  animation: spin 0.9s linear infinite;
-}
-
-/* 處理中麥克風緩慢呼吸，與旋轉光圈一起表達「還在跑，不是當掉」。 */
-body.processing #mic {
-  animation: breathe 1.6s ease-in-out infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes breathe {
-  0%,
-  100% {
-    opacity: 0.55;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-/* 每個 path 的初始顏色；overlay.js 會隨音量覆寫此 fill。 */
 #mic path {
-  fill: #e9e9ef;
+  fill: var(--accent);
+}
+
+/* 錄音中：波形＋秒數。處理中整組隱藏。 */
+#rec {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#bars {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+}
+
+/* 條高固定 18px，用 transform: scaleY() 改變高度——只觸發合成、不觸發版面重排。 */
+#bars span {
+  display: block;
+  width: 2.5px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  transform: scaleY(0.1667);
+  transform-origin: center;
+  opacity: 0.7;
+}
+
+#timer {
+  min-width: 32px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+/* 處理中：不確定進度條（一小段色塊來回滑動）＋文字。 */
+#busy {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+#busy .track {
+  position: relative;
+  width: 48px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+#busy .slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 40%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: slide 1.1s ease-in-out infinite alternate;
+}
+
+body.processing #rec {
+  display: none;
+}
+
+body.processing #busy {
+  display: flex;
+}
+
+/* 警告泡：琥珀＝聲音太小，紅＝收不到聲音。 */
+#warning {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: enter 150ms ease-out;
+}
+
+#warning svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+#warning[data-tone="low"] {
+  color: #fbbf24;
+}
+
+#warning[data-tone="muted"] {
+  color: #f87171;
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(150%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #pill.enter,
+  #warning {
+    animation: none;
+  }
+  #busy .slider {
+    animation-duration: 2.4s;
+  }
 }

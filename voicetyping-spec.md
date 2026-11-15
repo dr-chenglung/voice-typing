@@ -2,6 +2,7 @@
 
 > 原為實作前的拍板規格；**本版已於 2026-06-22 同步為「實作完成後的實際狀態」**，內容反映目前程式碼真正的行為。架構與套件仍為已拍板事項，請勿自行更動；若有技術障礙需變更，請先在程式碼註解標明並回報，不要默默改掉。
 >
+> **2026-11-15 更新**：錄音浮動視窗由黑色麥克風剪影改為**膠囊**（波形、秒數、音量警告），使用者主動要求；見 §4 浮動視窗段落與里程碑 21。
 > **2026-06-24 更新**：UI/事件迴圈框架已由使用者主動要求並核准，由 `tray-icon`+`tao`+`softbuffer`+`windows-sys` 自刻方案遷移至 **Tauri 2.x**（純靜態 HTML/CSS/JS 前端，零 Node.js 工具鏈），並新增**設定視窗**、**歷史紀錄視窗**、疊加視窗改為 canvas 動畫繪製。同日另一項使用者要求：系統托盤圖示與底部疊加視窗皆改為**黑色麥克風造型**（取代原色塊／長條波形），音量改以發光與縮放表達。業務邏輯模組（`audio.rs`/`hotkey.rs`/`transcribe.rs`/`typer.rs`）未受影響。本版各章節已同步更新為遷移後狀態；§10 的排除清單亦相應修正。
 >
 > **2026-07-01 更新**：STT 與 LLM 校正原本「共用一支 GROQ_API_KEY、端點寫死 Groq」的規則，改為**兩者可在設定視窗各自獨立設定 API URL／API Key／模型**（使用者主動要求，不再綁死單一供應商）。預設值仍為 Groq 對應端點；只要供應商提供 OpenAI 相容的 `audio/transcriptions`／`chat/completions` 端點即可切換使用。詳見 §5、§7。
@@ -94,11 +95,11 @@
 | `Processing` | 處理中（⏳，轉錄＋校正期間） |
 | 錯誤（短暫） | 橘色，數秒後自動回 `Idle` |
 
-**麥克風圖示浮動視窗（額外功能，使用者要求並已實作）：** 錄音時於螢幕底部置中顯示一個黑色麥克風剪影的浮動視窗，隨麥克風音量即時發光／微微放大，提供更直覺的錄音回饋（2026-06-24 由長條波形改為麥克風圖示，同樣理由：使用者要求更直覺的視覺回饋）。
+**膠囊浮動視窗（額外功能，使用者要求並已實作）：** 錄音時於螢幕底部置中顯示一顆膠囊：小麥克風圖示＋24 根隨音量跳動的波形條＋錄音秒數，一般模式為活力橙、翻譯模式為藍紫；音量過小時膠囊上方出現提示泡（琥珀「聲音太小」、紅「收不到聲音」）；錄音結束改顯示不確定進度條＋「處理中…」。（2026-11-15 由黑色麥克風剪影改為膠囊，使用者主動要求，剪影版本保留在 tag `v0.2.3`，不做樣式切換。設計見 `docs/superpowers/specs/2026-11-15-capsule-overlay-design.md`。）
 
 - 視窗**不奪取輸入焦點、可點擊穿透、不進 Alt-Tab**，不影響使用者正在輸入的視窗。
-- 音量由音訊 callback 寫入 `Arc<AtomicU32>`（存 f32 的 bits），疊加視窗每 ~33ms 讀取重繪。
-- 圖示本體固定黑色，不隨音量變色；音量大小只影響發光強度與縮放比例，不影響顏色或形狀。
+- 音量由音訊 callback 餵進記憶體內的即時音量計 `audio::Meter`（開始錄音 reset、停止後 clear，不留存樣本）；`overlay.rs` 每 ~33ms 取最近約 40ms 樣本分成 24 段 RMS，以 `meter` 事件（`{bars, warning}`）推給前端重繪。
+- 音量警告：錄音滿 2 秒才判斷；最近 2 秒幾乎全零 → 紅「收不到聲音」；至今的錄音會被靜音略過規則判成沒說話 → 琥珀「聲音太小」（與停止時的靜音略過共用同一份相對比值判準，不受 Windows 麥克風音量滑桿影響）。
 
 ### 3.4 焦點視窗鎖定
 
@@ -204,14 +205,14 @@ STT 與 LLM 校正**各自獨立設定** API URL／API Key／模型（設定視�
 
 ```
 Idle
- └─[右 Alt]→ Recording（cpal 開 stream，系統列圖示變紅，麥克風圖示視窗出現）
-              └─[右 Alt]→ Processing（關 stream，封裝 WAV，系統列圖示變黃，麥克風圖示視窗消失）
+ └─[右 Alt]→ Recording（cpal 開 stream，系統列圖示變紅，膠囊視窗出現）
+              └─[右 Alt]→ Processing（關 stream，封裝 WAV，系統列圖示變黃，膠囊視窗消失）
                             ├─ STT（預設 Groq Whisper，language=auto，忠實原語言）→ 原始文字
                             ├─ LLM 輕度校正（預設 Groq）→ 乾淨文字（失敗則降級用原始文字）
                             └─ 剪貼簿貼上到焦點視窗（失敗退回 enigo 打字）→ 回到 Idle（圖示變灰）
 ```
 
-> **開始錄音當下讀取設定檔的 `translate_mode_active`，決定本次輸出走一般或翻譯分支**（見 §3.1、§5.4）：開關關閉時開始錄音 → 上圖的「LLM 輕度校正」分支；開關開啟時開始錄音 → 改走「LLM 翻譯」分支（`transcribe::translate`，overlay 疊加視窗同時改用藍紫色發光）。錄音期間（甚至停止後處理期間）去設定視窗切換開關，不會改變本次已決定的分支，只影響下一次錄音；本質仍是同一個 `Idle → Recording → Processing` 迴圈，只是輸出分支多了一種，且不再需要第二支熱鍵來選擇。
+> **開始錄音當下讀取設定檔的 `translate_mode_active`，決定本次輸出走一般或翻譯分支**（見 §3.1、§5.4）：開關關閉時開始錄音 → 上圖的「LLM 輕度校正」分支；開關開啟時開始錄音 → 改走「LLM 翻譯」分支（`transcribe::translate`，overlay 疊加視窗同時改用藍紫色）。錄音期間（甚至停止後處理期間）去設定視窗切換開關，不會改變本次已決定的分支，只影響下一次錄音；本質仍是同一個 `Idle → Recording → Processing` 迴圈，只是輸出分支多了一種，且不再需要第二支熱鍵來選擇。
 
 - 轉錄與校正在 `tokio::spawn` 的背景任務執行，**絕不可阻塞熱鍵監聽執行緒**。
 
@@ -221,9 +222,9 @@ Idle
 
 | 執行緒 | 職責 |
 |--------|------|
-| **主執行緒** | 跑 Tauri/webview 的 Windows 事件迴圈（系統托盤圖示點擊／選單事件、overlay／設定／歷史紀錄視窗皆在主執行緒處理）；麥克風圖示動畫由 overlay 視窗自己的 webview（canvas + `requestAnimationFrame`）驅動，不佔用主執行緒運算。 |
+| **主執行緒** | 跑 Tauri/webview 的 Windows 事件迴圈（系統托盤圖示點擊／選單事件、overlay／設定／歷史紀錄視窗皆在主執行緒處理）；膠囊動畫由 overlay 視窗自己的 webview（DOM + `requestAnimationFrame`）驅動，不佔用主執行緒運算。 |
 | **熱鍵執行緒** | `rdev::listen`（阻塞式）獨立 thread，偵測右 Alt 按下，切換狀態。 |
-| **controller 執行緒** | 管理 `cpal` 錄音串流的開關、把 PCM 寫入 `Arc<Mutex<Vec<f32>>>`、即時音量寫入 `Arc<AtomicU32>`；停止錄音後在自有的 `tokio` runtime（`block_on`）跑 STT＋LLM 網路請求與輸出，並直接呼叫 `tray::set_state`/`overlay::show`/`overlay::hide` 回報狀態。 |
+| **controller 執行緒** | 管理 `cpal` 錄音串流的開關、把 PCM 寫入 `Arc<Mutex<Vec<f32>>>`、即時音量餵給 `audio::Meter`；停止錄音後在自有的 `tokio` runtime（`block_on`）跑 STT＋LLM 網路請求與輸出，並直接呼叫 `tray::set_state`/`overlay::show`/`overlay::hide` 回報狀態。 |
 
 - 狀態以 controller 執行緒內的區域變數驅動（`Idle`/`Recording`/`Processing`），對外以直接呼叫 tray/overlay 的方式回報；熱鍵執行緒與 controller 執行緒之間用 `mpsc::channel` 傳遞 toggle 訊號。
 - 背景任務（轉錄、校正、輸出）**絕不可阻塞主執行緒或熱鍵執行緒**——它們都在 controller 執行緒裡跑，與前兩者完全分離。
@@ -284,7 +285,7 @@ translate_mode_active  = false       # 翻譯模式開關：開啟後下一次�
 1. 程式啟動後常駐於系統列，不開主視窗也能運作。
 2. 在任一文字輸入框（先以記事本／瀏覽器輸入框驗證）中，按 `右 Alt` → 說一句話 → 再按 `右 Alt`，數秒後文字自動出現在游標處。
 3. 出現的文字已去除明顯贅詞、帶正確標點，且**未改變原意、未翻譯原語言**。
-4. 系統列圖示在 閒置／錄音中／處理中 三種狀態有明顯區別；錄音時螢幕底部出現隨音量發光/縮放的麥克風圖示視窗。
+4. 系統列圖示在 閒置／錄音中／處理中 三種狀態有明顯區別；錄音時螢幕底部出現隨音量跳動的膠囊視窗（波形、秒數、音量提示）。
 5. 連續使用多次不需重啟程式；單次失敗（如斷網）後仍能正常進行下一次。
 6. API key 由設定檔／環境變數讀入，未硬編碼。
 
@@ -317,12 +318,12 @@ translate_mode_active  = false       # 翻譯模式開關：開啟後下一次�
 5. **輸出**：剪貼簿貼上（Ctrl+V）到焦點視窗，失敗退回 `enigo` 打字。（`typer.rs`）
 6. **系統列與狀態**：`tauri::tray` 串起三種狀態回饋及選單。（`tray.rs`）
 7. **整合與容錯**：背景非同步、失敗回 Idle、設定檔。（`main.rs`、`controller.rs`、`config.rs`、`state.rs`）
-8. **額外**：錄音時的麥克風圖示浮動視窗。（`overlay.rs` + `ui/overlay/`）
+8. **額外**：錄音時的浮動視窗（2026-11-15 起為膠囊，見里程碑 21）。（`overlay.rs` + `ui/overlay/`）
 9. **Tauri 架構遷移**（2026-06-24，使用者主動要求並核准）：UI/事件迴圈框架由 `tray-icon`+`tao`+`softbuffer`+`windows-sys` 自刻方案改為 Tauri 2.x；業務邏輯模組不變。
 10. **設定視窗**：GUI 取代手改 `config.toml`，存檔立即生效（熱鍵變更需重啟）。（`commands.rs`、`config.rs`、`ui/settings/`）
 11. **歷史紀錄視窗**：轉錄文字持久化存於 `history.json`，可清除。（`history.rs`、`commands.rs`、`ui/history/`）
-12. **疊加視窗 canvas 美化**：以 webview canvas 動畫（漸層／發光／easing）取代原 CPU 像素繪製。（`ui/overlay/overlay.js`）
-13. **麥克風造型圖示**（2026-06-24，使用者要求）：系統托盤圖示與底部疊加視窗皆由抽象色塊／長條波形改為黑色麥克風剪影（托盤用 Rust 程式生成＋SS=4 超取樣反鋸齒，疊加視窗用 canvas `roundRect` 繪製），音量改以發光強度／縮放幅度表達，圖示本體顏色維持黑色（其餘狀態變色規則不變）。（`tray.rs`、`overlay.rs`、`ui/overlay/overlay.js`）
+12. **（已被里程碑 21 取代）疊加視窗 canvas 美化**：以 webview canvas 動畫（漸層／發光／easing）取代原 CPU 像素繪製。（`ui/overlay/overlay.js`）
+13. **麥克風造型圖示**（2026-06-24，使用者要求；底部疊加視窗部分已被里程碑 21 的膠囊取代，托盤圖示仍適用）：系統托盤圖示與底部疊加視窗皆由抽象色塊／長條波形改為黑色麥克風剪影（托盤用 Rust 程式生成＋SS=4 超取樣反鋸齒，疊加視窗用 canvas `roundRect` 繪製），音量改以發光強度／縮放幅度表達，圖示本體顏色維持黑色（其餘狀態變色規則不變）。（`tray.rs`、`overlay.rs`、`ui/overlay/overlay.js`）
 14. **STT／LLM 各自獨立供應商設定**（2026-07-01，使用者主動要求）：`groq_api_key` 單一欄位拆為 `stt_api_key`／`stt_api_url`／`stt_model` 與 `llm_api_key`／`llm_api_url`／`llm_model`，`transcribe.rs` 的端點改由呼叫端傳入，預設值仍為 Groq；設定視窗新增對應欄位。（`config.rs`、`transcribe.rs`、`controller.rs`、`commands.rs`、`ui/settings/`）
 15. **失敗一律系統通知**（2026-07-01，使用者主動要求）：托盤圖示變色＋tooltip 太容易被忽略，改用 `tauri-plugin-notification` 補發 Windows 系統通知；中止性錯誤與 LLM 校正的三種降級情況都各自發通知說明原因。（`notify.rs`、`controller.rs`）
 16. **移除 API key 環境變數 fallback、修正校正 prompt 洩漏定界符**（2026-07-01，使用者主動要求）：`GROQ_API_KEY`/`.env`/`dotenvy` 整條路徑移除，API key 一律只能在設定視窗填入，錯誤訊息不再提及環境變數；同時修正校正用的 `SYSTEM_PROMPT` 與 user message，明確禁止把 `[逐字稿開始]`/`[逐字稿結束]` 這兩個分隔符號本身輸出出來（先前部分模型會把定界符也一起回傳）。（`config.rs`、`transcribe.rs`、`main.rs`、`Cargo.toml`）
@@ -330,6 +331,7 @@ translate_mode_active  = false       # 翻譯模式開關：開啟後下一次�
 18. **移除語言設定欄位，STT 一律自動偵測**（2026-07-01，使用者要求）：設定視窗的「語言」欄位與 `config.toml` 的 `language` 欄位整條移除（前端 UI → IPC → Config → STT 呼叫），STT 一律不送 `language` 參數、忠實轉錄原語言；同時放棄「指定 zh 時送繁體 prompt」，繁體轉換改全靠 LLM 校正。（`config.rs`、`commands.rs`、`transcribe.rs`、`controller.rs`、`ui/settings/`）
 19. **翻譯輸出（雙熱鍵版，2026-07-30，使用者主動要求並已實作，同日於里程碑 20 回退）**：新增可獨立設定的第二支翻譯熱鍵（`translate_hotkey`）與目標語言設定（`target_language`）；本次錄音開始時按的是哪顆鍵決定輸出走一般校正或翻譯（`OutputMode`）。翻譯使用獨立的 `TRANSLATE_SYSTEM_PROMPT_TEMPLATE`，一次 LLM 呼叫同時完成清理與翻譯，不受 `enable_correction` 影響，降級規則比照校正；overlay 疊加視窗翻譯模式改用藍紫色發光（一般模式維持活力橙）；歷史紀錄新增 `translated`/`target_language`/`source_text` 欄位並相容舊版無此欄位的 `history.json`；主熱鍵與翻譯熱鍵的可選項由 2 種擴充為 5 種（不含 `right_shift`：持續按右 Shift 打大寫字母會與正常打字衝突，故不提供）；翻譯熱鍵不可與主熱鍵相同，衝突時存檔會擋下、既有設定衝突則於啟動時停用並通知。（`config.rs`、`state.rs`、`hotkey.rs`、`transcribe.rs`、`controller.rs`、`commands.rs`、`overlay.rs`、`history.rs`、`main.rs`、`ui/settings/`、`ui/history/`、`ui/overlay/`）
 20. **翻譯輸出改回單熱鍵＋設定切換（2026-07-31，使用者主動要求回退簡化）**：移除里程碑 19 的第二支翻譯熱鍵（`translate_hotkey`）與其衝突驗證（`validate_translate_hotkey`／`resolved_translate_key`），改為單一熱鍵維持不變、新增 `translate_mode_active` 設定（預設 `false`，設定視窗提供「啟用翻譯模式」勾選框）；`controller.rs` 在 `Idle→Recording` 轉換當下讀取這個開關決定 `OutputMode`，**不需重啟程式**。熱鍵可選項因此縮回 2 種（`right_alt`／`right_ctrl`），移除當初為雙熱鍵防衝突而加的 `scroll_lock`/`pause`/`insert`。翻譯提示詞、LLM 呼叫方式、降級規則、overlay 配色、歷史紀錄欄位皆沿用里程碑 19 的實作不變；托盤閒置 tooltip 新增顯示目前模式（`tray::set_idle_tooltip`）。（`config.rs`、`state.rs`、`hotkey.rs`、`controller.rs`、`commands.rs`、`tray.rs`、`ui/settings/`）
+21. **錄音浮動視窗改為膠囊**（2026-11-15，使用者主動要求）：取代黑色麥克風剪影（保留在 tag `v0.2.3`），24 根波形條＋錄音秒數＋兩級音量警告（琥珀「聲音太小」、紅「收不到聲音」）＋處理中進度條；即時音量計 `audio::Meter` 取代 `Arc<AtomicU32>`；警告與靜音略過共用同一份相對比值判準。（`audio.rs`、`overlay.rs`、`ui/overlay/`）
 
 ### 模組對照
 
@@ -348,7 +350,7 @@ translate_mode_active  = false       # 翻譯模式開關：開啟後下一次�
 | `controller.rs` | 狀態機協調、管線（依 `OutputMode` 分派一般校正或翻譯）、容錯降級 |
 | `typer.rs` | 剪貼簿貼上輸出（Ctrl+V；失敗退回 `enigo`） |
 | `tray.rs` | 系統列圖示、狀態顯示、選單（開啟 VoiceTyping／歷史紀錄／結束）、`open_main_window`；閒置 tooltip 附加目前模式 |
-| `overlay.rs` | 麥克風圖示疊加視窗的生命週期管理（顯示／隱藏／定位／NOACTIVATE／一般或翻譯配色） |
+| `overlay.rs` | 膠囊疊加視窗的生命週期管理（顯示／隱藏／定位／NOACTIVATE／波形與警告推播／失效重建） |
 | `history.rs` | 轉錄文字歷史紀錄讀寫（`app_data_dir()/history.json`，含翻譯關聯欄位） |
 | `notify.rs` | 背景執行緒失敗時發 Windows 系統通知（`tauri-plugin-notification`） |
 
@@ -356,5 +358,5 @@ translate_mode_active  = false       # 翻譯模式開關：開啟後下一次�
 
 | 目錄 | 職責 |
 |------|------|
-| `ui/overlay/` | 麥克風圖示視窗：canvas 繪製黑色麥克風剪影，隨音量發光＋輕微縮放＋easing |
+| `ui/overlay/` | 膠囊視窗：24 根波形條（`lib/bars.js` 自動校準＋平滑）＋秒數＋音量警告泡＋處理中進度條 |
 | `ui/app/` | 主視窗（取代原本的設定視窗與歷史紀錄視窗）：左側邊欄切頁，`pages/` 每頁一個模組、`lib/` 放可測的純邏輯；呼叫 `get_config`/`save_config`/`get_history`/`clear_history`/`get_status` |
