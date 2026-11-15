@@ -2,7 +2,7 @@
 // 基本型、積極型的提示詞唯讀顯示（讓使用者知道它怎麼寫的）；自訂型由使用者自己寫整份提示詞，
 // 文字存在 Rust 端的 custom_prompt.txt（不進 config.toml）。
 import * as api from "../api.js";
-import { STYLE_CHOICES, styleChoiceFromConfig, configPatchForStyle } from "../lib/settings.js";
+import { STYLE_CHOICES, styleChoiceFromConfig, configPatchForStyle, planCustomSelection } from "../lib/settings.js";
 import { escapeHtml as esc } from "../lib/html.js";
 
 const CUSTOM_WARNING =
@@ -79,7 +79,11 @@ function bind() {
     customText = textarea.value;
   });
   for (const btn of section.querySelectorAll("button[data-copy]")) {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
+      // 文字框裡有還沒存的內容時，複製會把它蓋掉：先確認，免得誤按就弄丟一長段文字。
+      if (customText.trim() && customText !== savedCustom) {
+        if (!(await ctx.confirm("文字框裡有還沒儲存的內容，複製會覆蓋它，確定要覆蓋嗎？"))) return;
+      }
       customText = prompts[btn.dataset.copy];
       textarea.value = customText;
     });
@@ -100,9 +104,20 @@ function toggleView(btn) {
 
 async function choose(id) {
   setStatus("");
+  let saveFirst = false;
+  if (id === "custom") {
+    const plan = planCustomSelection(customText, savedCustom);
+    if (plan.error) {
+      // 文字框空白：直接顯示錯誤並展開編輯區，不存任何東西（避免蓋掉已存的提示詞）。
+      expanded.add("custom");
+      await draw(plan.error, true);
+      return;
+    }
+    saveFirst = plan.saveFirst;
+  }
   try {
     // 選自訂時，文字框裡還沒存的內容要先存起來，否則選了卻讀不到。
-    if (id === "custom" && customText !== savedCustom) {
+    if (saveFirst) {
       await api.saveCustomPrompt(customText);
       savedCustom = customText;
     }

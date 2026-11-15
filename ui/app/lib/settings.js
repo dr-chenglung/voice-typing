@@ -108,6 +108,18 @@ export function setupWarnings(cfg) {
   return warnings;
 }
 
+/** 與 Rust 端 `validate_custom_prompt` 的錯誤訊息相同（有測試比對），選自訂但文字空白時顯示。 */
+export const EMPTY_CUSTOM_PROMPT_MESSAGE = "自訂提示詞還是空的，請先寫內容，或按「從基本型複製」";
+
+/**
+ * 選「自訂」之前的決策。文字框空白時一律回錯誤、**不先存檔**：否則會把原本存好的提示詞蓋成空的，
+ * 選項卻又切換失敗。文字有改過才需要先存（選了卻讀不到未存的內容是更糟的結果）。
+ */
+export function planCustomSelection(customText, savedCustom) {
+  if (!String(customText).trim()) return { error: EMPTY_CUSTOM_PROMPT_MESSAGE, saveFirst: false };
+  return { error: null, saveFirst: customText !== savedCustom };
+}
+
 const HOTKEY_LABELS = { right_alt: "右 Alt", right_ctrl: "右 Ctrl" };
 
 /** 熱鍵設定值換成給人看的名稱；不認得的值原樣顯示。 */

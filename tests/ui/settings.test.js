@@ -11,6 +11,8 @@ import {
   configPatchForStyle,
   endpointHost,
   setupWarnings,
+  planCustomSelection,
+  EMPTY_CUSTOM_PROMPT_MESSAGE,
   hotkeyLabel,
 } from "../../ui/app/lib/settings.js";
 import { readFileSync } from "node:fs";
@@ -125,4 +127,25 @@ test("setupWarnings：整理用金鑰只在會用到時才檢查", () => {
   assert.deepEqual(setupWarnings({ ...noLlmKey, enable_correction: false, translate_mode_active: false }), []);
   assert.deepEqual(setupWarnings({ ...noLlmKey, enable_correction: false, translate_mode_active: true }),
     [{ message: "AI 整理 API 還沒有填金鑰", goTo: "llm" }]);
+});
+
+// 選「自訂」前的決策：文字框空白時不能先存檔，否則會把原本存好的提示詞蓋成空的。
+test("planCustomSelection：文字框空白（含只有空白字元）→ 回錯誤，而且不先存檔", () => {
+  for (const text of ["", "  \n\t "]) {
+    assert.deepEqual(planCustomSelection(text, "已存的提示詞"), { error: EMPTY_CUSTOM_PROMPT_MESSAGE, saveFirst: false });
+  }
+});
+
+test("planCustomSelection：文字和已存的相同 → 不用先存", () => {
+  assert.deepEqual(planCustomSelection("我的提示詞", "我的提示詞"), { error: null, saveFirst: false });
+});
+
+test("planCustomSelection：文字有改過 → 先存再選用", () => {
+  assert.deepEqual(planCustomSelection("新的", "舊的"), { error: null, saveFirst: true });
+  assert.deepEqual(planCustomSelection("新的", ""), { error: null, saveFirst: true });
+});
+
+test("錯誤訊息與 Rust 端 validate_custom_prompt 的文字一致", () => {
+  const rust = readFileSync(fileURLToPath(new URL("../../src-tauri/src/commands.rs", import.meta.url)), "utf8");
+  assert.ok(rust.includes(EMPTY_CUSTOM_PROMPT_MESSAGE));
 });

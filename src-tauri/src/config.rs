@@ -99,7 +99,22 @@ impl Config {
         if let Ok(dir) = config_dir(app) {
             cfg.custom_prompt = read_custom_prompt(&dir);
         }
+        if cfg.normalize_custom_prompt() {
+            eprintln!("[config] use_custom_prompt 為開啟，但找不到自訂提示詞（custom_prompt.txt），已暫時改用內建風格");
+        }
         Ok(cfg)
+    }
+
+    /// 開關是開的但自訂文字是空的（檔案被刪、只備份了 config.toml、檔案壞掉）：在記憶體中把開關關掉，
+    /// 讓設定頁顯示與實際行為（退回內建風格）一致；否則每一頁存檔都會被「自訂提示詞還是空的」擋下。
+    /// 不寫回檔案，下次任何頁面存檔時才一併更新。回傳是否有修正。
+    pub fn normalize_custom_prompt(&mut self) -> bool {
+        if self.use_custom_prompt && self.custom_prompt.trim().is_empty() {
+            self.use_custom_prompt = false;
+            true
+        } else {
+            false
+        }
     }
 
     /// 執行時真正要用的自訂提示詞：必須選了「自訂」**而且**文字非空白才回 `Some`。
@@ -157,8 +172,17 @@ pub fn config_path(app: &AppHandle) -> Result<PathBuf> {
 }
 
 /// 讀自訂提示詞；檔案不存在或讀不到都當作沒有（回空字串）。
+/// 「不存在」是正常情況（還沒寫過），「存在卻讀不到」（權限、非 UTF-8 等）要留下 log，免得無聲消失。
 pub fn read_custom_prompt(dir: &Path) -> String {
-    std::fs::read_to_string(dir.join(CUSTOM_PROMPT_FILE)).unwrap_or_default()
+    let path = dir.join(CUSTOM_PROMPT_FILE);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => {
+            eprintln!("[config] 讀取自訂提示詞失敗（{}）：{e}", path.display());
+            String::new()
+        }
+    }
 }
 
 /// 寫自訂提示詞；資料夾還不存在時先建立。
@@ -248,6 +272,33 @@ mod tests {
         assert_eq!(read_custom_prompt(&dir), "");
         write_custom_prompt(&dir, "第一行\n第二行").unwrap();
         assert_eq!(read_custom_prompt(&dir), "第一行\n第二行");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 設定檔寫著「自訂」但自訂文字讀不到（只備份了 config.toml、檔案被刪或壞掉）：啟動時要在記憶體中把
+    /// 開關關掉，否則每一頁的存檔都會被「自訂提示詞還是空的」擋下，使用者還找不到原因。
+    #[test]
+    fn normalize_custom_prompt_turns_the_flag_off_when_the_text_is_missing() {
+        let mut cfg: Config = toml::from_str("").unwrap();
+        for (flag, text, flag_after, changed) in [
+            (true, "", false, true),
+            (true, "  \n", false, true),
+            (true, "我的提示詞", true, false),
+            (false, "", false, false),
+        ] {
+            cfg.use_custom_prompt = flag;
+            cfg.custom_prompt = text.to_string();
+            assert_eq!(cfg.normalize_custom_prompt(), changed, "flag={flag} text={text:?}");
+            assert_eq!(cfg.use_custom_prompt, flag_after, "flag={flag} text={text:?}");
+        }
+    }
+
+    /// 檔案存在卻讀不到（這裡用「同名資料夾」模擬）不能 panic，當作沒有文字。
+    #[test]
+    fn unreadable_custom_prompt_file_reads_as_empty() {
+        let dir = unique_temp_dir("unreadable");
+        std::fs::create_dir_all(dir.join("custom_prompt.txt")).unwrap();
+        assert_eq!(read_custom_prompt(&dir), "");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
