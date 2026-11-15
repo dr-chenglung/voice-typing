@@ -46,8 +46,8 @@ body.translate {
   height: 40px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 14px;
+  gap: 8px;
+  padding: 0 12px;
   border-radius: 999px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -61,8 +61,8 @@ body.translate {
 }
 
 #mic {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   flex: none;
 }
 
@@ -74,7 +74,7 @@ body.translate {
 #rec {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 #bars {
@@ -87,7 +87,7 @@ body.translate {
 /* 條高固定 28px，用 transform: scaleY() 改變高度——只觸發合成、不觸發版面重排。 */
 #bars span {
   display: block;
-  width: 3px;
+  width: 2.5px;
   height: 28px;
   border-radius: 999px;
   background: var(--accent);
@@ -97,9 +97,9 @@ body.translate {
 }
 
 #timer {
-  min-width: 32px;
+  min-width: 28px;
   text-align: right;
-  font-size: 12px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);
 }
@@ -108,14 +108,14 @@ body.translate {
 #busy {
   display: none;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   font-size: 12px;
   color: var(--accent);
 }
 
 #busy .track {
   position: relative;
-  width: 48px;
+  width: 40px;
   height: 4px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.12);
