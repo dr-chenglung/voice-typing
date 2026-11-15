@@ -154,7 +154,7 @@ pub fn live_warning(windows: &[f32]) -> LiveWarning {
 }
 
 /// 浮動視窗波形的條數。
-pub const BAR_COUNT: usize = 24;
+pub const BAR_COUNT: usize = 20;
 /// 波形取最近多少毫秒的樣本來分段。
 const TAIL_MS: usize = 40;
 
@@ -201,7 +201,7 @@ impl MeterInner {
     }
 }
 
-/// 錄音中的即時音量計：音訊 callback 餵樣本進來，浮動視窗取 24 段波形與警告。
+/// 錄音中的即時音量計：音訊 callback 餵樣本進來，浮動視窗取 20 段波形與警告。
 ///
 /// 只存在記憶體，`reset`（開始錄音）與 `clear`（停止錄音）都會把樣本清空，
 /// 符合「語音資料用完即丟」的規則。內部用 `Mutex` 保護；呼叫端取值後再去呼叫
@@ -668,9 +668,9 @@ mod tests {
 
     #[test]
     fn segment_rms_always_returns_n_values() {
-        assert_eq!(segment_rms(&[], 24), vec![0.0; 24]);
-        assert_eq!(segment_rms(&[0.5; 10], 24).len(), 24);
-        let v = segment_rms(&[0.5; 1_000], 24);
+        assert_eq!(segment_rms(&[], BAR_COUNT), vec![0.0; BAR_COUNT]);
+        assert_eq!(segment_rms(&[0.5; 10], BAR_COUNT).len(), BAR_COUNT);
+        let v = segment_rms(&[0.5; 1_000], BAR_COUNT);
         assert!(v.iter().all(|x| (x - 0.5).abs() < 1e-6));
     }
 

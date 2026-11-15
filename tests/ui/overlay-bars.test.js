@@ -46,7 +46,8 @@ test("相同輸入時中間的條不低於兩端", () => {
   const s = createBarState();
   for (let i = 0; i < 30; i++) updateBars(s, uniform(0.003));
   const h = feed(s, uniform(0.03), 5);
-  assert.ok(h[11] >= h[0] && h[12] >= h[23]);
+  const mid = BAR_COUNT / 2;
+  assert.ok(h[mid - 1] >= h[0] && h[mid] >= h[BAR_COUNT - 1]);
 });
 
 test("formatElapsed 為 m:ss", () => {

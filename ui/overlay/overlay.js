@@ -3,14 +3,15 @@
 //   - "overlay-show"：每次顯示時送一次，payload { translate, seq, elapsed_ms }。
 //       重置波形、切換一般／翻譯配色、記下秒數起點；收到後在下一影格回報 "overlay-alive"（看門狗）。
 //       elapsed_ms 在視窗失效重建時為「已經錄了多久」，秒數才不會歸零。
-//   - "meter"：錄音中每 ~33ms 一次，payload { bars: 24 個原始 RMS, warning: "none"|"low"|"muted" }。
+//   - "meter"：錄音中每 ~33ms 一次，payload { bars: 20 個原始 RMS, warning: "none"|"low"|"muted" }。
 //   - "overlay-processing"：錄音結束、等待 STT／LLM 回傳，切成不確定進度條。
 // 波形的校準與平滑在 lib/bars.js；這裡只負責把狀態畫到 DOM 上。
 
 import { BAR_COUNT, createBarState, updateBars, formatElapsed } from "./lib/bars.js";
 
 const WARNING_TEXT = { low: "聲音太小", muted: "收不到聲音" };
-const MIN_SCALE = 3 / 18; // 條高 3~18px，固定高度 18px 用 scaleY 縮放
+const BAR_MAX_PX = 28; // 條高 3~28px（膠囊內高 38px），固定高度用 scaleY 縮放
+const MIN_SCALE = 3 / BAR_MAX_PX;
 
 const pill = document.getElementById("pill");
 const barsEl = document.getElementById("bars");

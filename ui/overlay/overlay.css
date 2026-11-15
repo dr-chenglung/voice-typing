@@ -36,7 +36,7 @@ body.translate {
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
-  padding-bottom: 10px;
+  padding-bottom: 14px; /* 給膠囊陰影留足透明邊，避免陰影被視窗下緣切出一條直線 */
 }
 
 #pill {
@@ -49,7 +49,7 @@ body.translate {
   border-radius: 999px;
   background: var(--surface);
   border: 1px solid var(--border);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   color: var(--text);
   white-space: nowrap;
 }
@@ -78,18 +78,18 @@ body.translate {
 #bars {
   display: flex;
   align-items: center;
-  gap: 2px;
-  height: 20px;
+  gap: 2.5px;
+  height: 30px;
 }
 
-/* 條高固定 18px，用 transform: scaleY() 改變高度——只觸發合成、不觸發版面重排。 */
+/* 條高固定 28px，用 transform: scaleY() 改變高度——只觸發合成、不觸發版面重排。 */
 #bars span {
   display: block;
-  width: 2.5px;
-  height: 18px;
+  width: 3px;
+  height: 28px;
   border-radius: 999px;
   background: var(--accent);
-  transform: scaleY(0.1667);
+  transform: scaleY(0.107);
   transform-origin: center;
   opacity: 0.7;
 }
