@@ -3,7 +3,7 @@
 //   - "overlay-show"：每次顯示時送一次，payload { translate, seq, elapsed_ms }。
 //       重置波形、切換一般／翻譯配色、記下秒數起點；收到後在下一影格回報 "overlay-alive"（看門狗）。
 //       elapsed_ms 在視窗失效重建時為「已經錄了多久」，秒數才不會歸零。
-//   - "meter"：錄音中每 ~33ms 一次，payload { bars: 20 個原始 RMS, warning: "none"|"low"|"muted" }。
+//   - "meter"：錄音中每 ~33ms 一次，payload { bars: 15 個原始 RMS, warning: "none"|"low"|"muted" }。
 //   - "overlay-processing"：錄音結束、等待 STT／LLM 回傳，切成不確定進度條。
 // 波形的校準與平滑在 lib/bars.js；這裡只負責把狀態畫到 DOM 上。
 

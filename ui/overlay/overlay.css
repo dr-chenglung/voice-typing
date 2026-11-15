@@ -80,14 +80,14 @@ body.translate {
 #bars {
   display: flex;
   align-items: center;
-  gap: 2.5px;
+  gap: 3px;
   height: 30px;
 }
 
 /* 條高固定 28px，用 transform: scaleY() 改變高度——只觸發合成、不觸發版面重排。 */
 #bars span {
   display: block;
-  width: 3px;
+  width: 4px;
   height: 28px;
   border-radius: 999px;
   background: var(--accent);

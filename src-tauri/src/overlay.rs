@@ -1,5 +1,5 @@
 //! 浮動疊加視窗的生命週期管理（顯示/隱藏/定位/波形與警告推播/失效自動重建）。
-//! 膠囊本身（20 根波形條、秒數、音量警告、處理中進度條）由前端 `ui/overlay/` 以 DOM 繪製，這裡只管視窗與推播資料。
+//! 膠囊本身（15 根波形條、秒數、音量警告、處理中進度條）由前端 `ui/overlay/` 以 DOM 繪製，這裡只管視窗與推播資料。
 //!
 //! 視窗特性：
 //!   - Tauri 內建：always_on_top、skip_taskbar、transparent、decorations(false)、click-through
@@ -87,7 +87,7 @@ struct OverlayShowPayload {
     elapsed_ms: u64,
 }
 
-/// meter 事件的 payload：20 段原始 RMS（未正規化）與目前的音量警告。
+/// meter 事件的 payload：15 段原始 RMS（未正規化）與目前的音量警告。
 #[derive(serde::Serialize, Clone)]
 struct MeterPayload {
     bars: Vec<f32>,
@@ -95,7 +95,7 @@ struct MeterPayload {
 }
 
 /// 在 setup 階段建立隱藏的疊加視窗，並啟動音量推播背景執行緒。
-/// `meter` 由音訊執行緒餵入樣本；這裡的背景執行緒每 tick 取 20 段波形與警告，以 `meter` 事件推給前端。
+/// `meter` 由音訊執行緒餵入樣本；這裡的背景執行緒每 tick 取 15 段波形與警告，以 `meter` 事件推給前端。
 pub fn create_window(app: &AppHandle, meter: Arc<Meter>) -> tauri::Result<()> {
     build_window(app, "overlay")?;
 
