@@ -69,22 +69,26 @@ impl LevelProfile {
     }
 }
 
-/// 算出整段錄音的音量輪廓：切成 `SILENCE_WINDOW_MS` 毫秒的視窗逐一求 RMS，
-/// 取最大值當峰值、取偏低的百分位數當底噪。
-///
-/// 判定與 log 都以這一份結果為準，樣本只掃一趟。視窗切得夠短（30ms），
-/// 長錄音裡只講了短短一句時峰值仍抓得到，不會被大量靜音稀釋。
-/// 視窗數不足 2 個（錄音短於一個視窗）時無從比較起伏，回傳 `floor == peak`，
-/// 依比值規則即判定為沒說話——30ms 裝不下一個完整音節，不會誤殺真正的語音。
-pub fn analyze_levels(samples: &[f32], sample_rate: u32) -> LevelProfile {
+/// 切成 `SILENCE_WINDOW_MS` 毫秒的視窗，逐一求 RMS。
+pub fn window_rms(samples: &[f32], sample_rate: u32) -> Vec<f32> {
     let window = ((sample_rate as usize * SILENCE_WINDOW_MS) / 1000).max(1);
-    let mut windows: Vec<f32> = samples
+    samples
         .chunks(window)
         .map(|w| {
             let sum_sq: f32 = w.iter().map(|s| s * s).sum();
             (sum_sq / w.len() as f32).sqrt()
         })
-        .collect();
+        .collect()
+}
+
+/// 由視窗 RMS 清單算出音量輪廓：取最大值當峰值、取偏低的百分位數當底噪。
+///
+/// 停止錄音時的靜音略過與錄音中的即時警告（`live_warning`）都走這一個函式，
+/// 兩邊的判準因此不會各自漂移。視窗切得夠短（30ms），
+/// 長錄音裡只講了短短一句時峰值仍抓得到，不會被大量靜音稀釋。
+/// 視窗數不足 2 個（錄音短於一個視窗）時無從比較起伏，回傳 `floor == peak`，
+/// 依比值規則即判定為沒說話——30ms 裝不下一個完整音節，不會誤殺真正的語音。
+pub fn profile_from_windows(mut windows: Vec<f32>) -> LevelProfile {
     if windows.is_empty() {
         return LevelProfile {
             peak: 0.0,
@@ -104,6 +108,48 @@ pub fn analyze_levels(samples: &[f32], sample_rate: u32) -> LevelProfile {
         peak,
         floor,
         loud_windows,
+    }
+}
+
+/// 算出整段錄音的音量輪廓（`window_rms` ＋ `profile_from_windows`）。
+pub fn analyze_levels(samples: &[f32], sample_rate: u32) -> LevelProfile {
+    profile_from_windows(window_rms(samples, sample_rate))
+}
+
+/// 「2 秒」折合的視窗數：錄音滿這麼久才開始判斷警告，「收不到聲音」也只看最近這麼多視窗。
+pub const WARN_WINDOWS: usize = 2000 / SILENCE_WINDOW_MS;
+
+/// 錄音中的即時音量警告，浮動視窗據此顯示提示。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LiveWarning {
+    /// 沒有問題（或還太早，無從判斷）。
+    None,
+    /// 聲音太小：照目前的錄音，停止後會被當成沒說話而略過（多半是離麥克風太遠）。
+    Low,
+    /// 收不到聲音：最近 2 秒幾乎全零（麥克風被關掉或沒有訊號）。
+    Muted,
+}
+
+/// 依「錄音開始至今」的視窗 RMS 清單判斷目前該顯示哪種警告。
+///
+/// 規則（照順序）：未滿 2 秒不判斷；最近 2 秒全部低於絕對下限 → `Muted`；
+/// 至今的錄音與停止時一樣會被判成沒說話 → `Low`；其餘 `None`。
+/// 一旦清楚講過話，整段就不再是「沒說話」，之後停頓思考也不會出現 `Low`。
+pub fn live_warning(windows: &[f32]) -> LiveWarning {
+    if windows.len() < WARN_WINDOWS {
+        return LiveWarning::None;
+    }
+    if windows[windows.len() - WARN_WINDOWS..]
+        .iter()
+        .all(|&w| w < MIN_SPEECH_PEAK_RMS)
+    {
+        return LiveWarning::Muted;
+    }
+    if profile_from_windows(windows.to_vec()).is_silent() {
+        LiveWarning::Low
+    } else {
+        LiveWarning::None
     }
 }
 
@@ -424,5 +470,74 @@ mod tests {
             "底噪應為 0.02，實際 {}",
             levels.floor
         );
+    }
+
+    // ---- 錄音中即時警告（見 live_warning）----
+
+    fn warn(samples: &[f32]) -> LiveWarning {
+        live_warning(&window_rms(samples, RATE))
+    }
+
+    #[test]
+    fn no_warning_before_two_seconds() {
+        assert_eq!(warn(&vec![0.0; RATE as usize]), LiveWarning::None);
+        assert_eq!(warn(&steady_noise(RATE as usize * 3 / 2, 0.002)), LiveWarning::None);
+    }
+
+    #[test]
+    fn all_zero_for_two_seconds_is_muted() {
+        assert_eq!(warn(&vec![0.0; RATE as usize * 3]), LiveWarning::Muted);
+    }
+
+    #[test]
+    fn steady_noise_is_low_regardless_of_level() {
+        for level in [0.0005, 0.002, 0.02, 0.2] {
+            assert_eq!(
+                warn(&steady_noise(RATE as usize * 3, level)),
+                LiveWarning::Low,
+                "level {level}"
+            );
+        }
+    }
+
+    #[test]
+    fn speech_has_no_warning_across_levels() {
+        for level in [0.002, 0.005, 0.05, 0.3] {
+            assert_eq!(
+                warn(&speech_like(RATE as usize * 3, level)),
+                LiveWarning::None,
+                "level {level}"
+            );
+        }
+    }
+
+    #[test]
+    fn pausing_after_speech_stays_clear() {
+        let mut s = speech_like(RATE as usize, 0.02);
+        // RMS 約 0.00058，明顯高於 MIN_SPEECH_PEAK_RMS，不會落入 Muted。
+        s.extend(steady_noise(RATE as usize * 3, 0.001));
+        assert_eq!(warn(&s), LiveWarning::None);
+    }
+
+    #[test]
+    fn muting_mid_recording_turns_red_then_recovers() {
+        let mut s = speech_like(RATE as usize * 2, 0.02);
+        s.extend(vec![0.0; RATE as usize * 2 + 1_000]);
+        assert_eq!(warn(&s), LiveWarning::Muted);
+        s.extend(speech_like(RATE as usize / 2, 0.02));
+        assert_eq!(warn(&s), LiveWarning::None);
+    }
+
+    #[test]
+    fn live_warning_is_unchanged_when_amplified() {
+        for base in [
+            steady_noise(RATE as usize * 3, 0.004),
+            speech_like(RATE as usize * 3, 0.003),
+        ] {
+            let v = warn(&base);
+            for gain in [0.25, 4.0, 20.0] {
+                assert_eq!(warn(&amplified(&base, gain)), v, "gain {gain}");
+            }
+        }
     }
 }
