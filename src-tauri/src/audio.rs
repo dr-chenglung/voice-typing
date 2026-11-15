@@ -111,9 +111,75 @@ pub fn profile_from_windows(mut windows: Vec<f32>) -> LevelProfile {
     }
 }
 
-/// 算出整段錄音的音量輪廓（`window_rms` ＋ `profile_from_windows`）。
+/// 錄音最前面這麼久不計入「有沒有說話」的判斷。
+///
+/// 開始錄音的提示音（`sound::play_start`）會被筆電的麥克風收進去，聽起來就是一段很明顯的聲音，
+/// 會被誤當成說話：警告因此不出現，停止時也會把沒講話的錄音送去辨識（得到「辨識結果為空」）。
+/// 使用者按下熱鍵到真正開口通常也超過這個時間；代價是按下熱鍵 0.7 秒內就結束的極短錄音會被略過。
+pub const START_SKIP_MS: usize = 700;
+/// `START_SKIP_MS` 折合的視窗數。
+const START_SKIP_WINDOWS: usize = START_SKIP_MS / SILENCE_WINDOW_MS;
+
+/// 去掉錄音最前面不計入判斷的視窗（錄音比這更短就整段都去掉）。
+fn skip_start(windows: &[f32]) -> &[f32] {
+    &windows[START_SKIP_WINDOWS.min(windows.len())..]
+}
+
+/// 算出整段錄音的音量輪廓（`window_rms` ＋ 略過開頭 ＋ `profile_from_windows`）。
 pub fn analyze_levels(samples: &[f32], sample_rate: u32) -> LevelProfile {
-    profile_from_windows(window_rms(samples, sample_rate))
+    profile_from_windows(skip_start(&window_rms(samples, sample_rate)).to_vec())
+}
+
+/// 把大聲區段排成 log 用的文字，例如「1.5–1.8s, 5.4–5.5s」；沒有就寫「（無）」，太多只列前 10 段。
+fn format_segments(segments: &[(f32, f32)]) -> String {
+    if segments.is_empty() {
+        return "（無）".to_string();
+    }
+    let mut text = segments
+        .iter()
+        .take(10)
+        .map(|(a, b)| format!("{a:.1}–{b:.1}s"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if segments.len() > 10 {
+        text.push_str(&format!(" …共 {} 段", segments.len()));
+    }
+    text
+}
+
+/// 逐視窗標記「明顯大聲」：高於底噪（第 20 百分位數）的 `SPEECH_OVER_FLOOR_RATIO` 倍，
+/// 且不低於絕對安全下限。跟 `profile_from_windows` 用同一個底噪與倍數，只是不再只數總數。
+fn loud_flags(analyzed: &[f32]) -> Vec<bool> {
+    let floor = profile_from_windows(analyzed.to_vec()).floor;
+    let cutoff = floor.max(1e-9) * SPEECH_OVER_FLOOR_RATIO;
+    analyzed
+        .iter()
+        .map(|&w| w > cutoff && w >= MIN_SPEECH_PEAK_RMS)
+        .collect()
+}
+
+/// 明顯大聲的區段（錄音的第幾秒到第幾秒），供停止錄音時印 log、日後調參對照用。
+/// 已略過開頭 `START_SKIP_MS`，所以那段不會出現在結果裡。
+pub fn loud_segments(windows: &[f32]) -> Vec<(f32, f32)> {
+    let analyzed = skip_start(windows);
+    let offset = windows.len() - analyzed.len();
+    let to_secs = |idx: usize| (offset + idx) as f32 * SILENCE_WINDOW_MS as f32 / 1000.0;
+    let mut segments = Vec::new();
+    let mut start: Option<usize> = None;
+    for (i, loud) in loud_flags(analyzed).into_iter().enumerate() {
+        match (loud, start) {
+            (true, None) => start = Some(i),
+            (false, Some(st)) => {
+                segments.push((to_secs(st), to_secs(i)));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(st) = start {
+        segments.push((to_secs(st), to_secs(analyzed.len())));
+    }
+    segments
 }
 
 /// 「2 秒」折合的視窗數：錄音滿這麼久才開始判斷警告，「收不到聲音」也只看最近這麼多視窗。
@@ -125,17 +191,32 @@ pub const WARN_WINDOWS: usize = 2000 / SILENCE_WINDOW_MS;
 pub enum LiveWarning {
     /// 沒有問題（或還太早，無從判斷）。
     None,
-    /// 聲音太小：照目前的錄音，停止後會被當成沒說話而略過（多半是離麥克風太遠）。
+    /// 聲音太小：最近一段時間沒有聽到明顯的說話（多半是離麥克風太遠），見 `live_warning`。
     Low,
     /// 收不到聲音：最近 2 秒幾乎全零（麥克風被關掉或沒有訊號）。
     Muted,
 }
 
+/// 還沒聽到說話時，安靜多久才提醒「聲音太小」。
+const WAIT_BEFORE_SPEECH_WINDOWS: usize = 4000 / SILENCE_WINDOW_MS;
+/// 已經講過話之後，要「連續安靜」多久才提醒（說話中間停頓個幾秒很正常，放寬很多）。
+const WAIT_AFTER_SPEECH_WINDOWS: usize = 8000 / SILENCE_WINDOW_MS;
+/// 判斷「一陣說話」的時間跨度：這麼久之內要有 `MIN_SPEECH_WINDOWS` 個明顯大聲的視窗。
+/// 限定在 1 秒內，才不會讓分散在整段錄音裡的零碎雜音（呼吸、按鍵、椅子聲）累積成「有說話」。
+const BURST_SPAN_WINDOWS: usize = 1000 / SILENCE_WINDOW_MS;
+
 /// 依「錄音開始至今」的視窗 RMS 清單判斷目前該顯示哪種警告。
 ///
-/// 規則（照順序）：未滿 2 秒不判斷；最近 2 秒全部低於絕對下限 → `Muted`；
-/// 至今的錄音與停止時一樣會被判成沒說話 → `Low`；其餘 `None`。
-/// 一旦清楚講過話，整段就不再是「沒說話」，之後停頓思考也不會出現 `Low`。
+/// 規則（照順序）：
+/// 1. 未滿 2 秒不判斷。
+/// 2. 最近 2 秒每個視窗都低於絕對下限 → `Muted`（紅）。
+/// 3. 略過開頭 `START_SKIP_MS` 後，分析的部分未滿 4 秒 → `None`。
+/// 4. 找出最後一次「一陣說話」（1 秒內 ≥ 4 個明顯大聲的視窗，見 `BURST_SPAN_WINDOWS`）：
+///    從沒說過話 → 安靜滿 4 秒就是 `Low`；說過話 → 要從那之後連續安靜滿 8 秒才是 `Low`。
+///    再開口說話，警告馬上清掉，之後又沉默才重新計時。
+///
+/// 全部以相對於底噪的倍數判斷（沿用靜音略過的標準），不受 Windows 麥克風音量滑桿影響。
+/// 這個警告看的是「最近安靜了多久」，**不再等於**「停止時會被略過」（那個看整段錄音）。
 pub fn live_warning(windows: &[f32]) -> LiveWarning {
     if windows.len() < WARN_WINDOWS {
         return LiveWarning::None;
@@ -146,7 +227,24 @@ pub fn live_warning(windows: &[f32]) -> LiveWarning {
     {
         return LiveWarning::Muted;
     }
-    if profile_from_windows(windows.to_vec()).is_silent() {
+    let analyzed = skip_start(windows);
+    if analyzed.len() < WAIT_BEFORE_SPEECH_WINDOWS {
+        return LiveWarning::None;
+    }
+    let loud = loud_flags(analyzed);
+    // 前綴和：prefix[i] = 前 i 個視窗裡明顯大聲的數量，用來 O(1) 查任一段的數量。
+    let mut prefix = vec![0usize; loud.len() + 1];
+    for (i, &l) in loud.iter().enumerate() {
+        prefix[i + 1] = prefix[i] + l as usize;
+    }
+    let last_burst = (0..loud.len()).rev().find(|&i| {
+        loud[i] && prefix[i + 1] - prefix[(i + 1).saturating_sub(BURST_SPAN_WINDOWS)] >= MIN_SPEECH_WINDOWS
+    });
+    let (quiet, limit) = match last_burst {
+        Some(i) => (loud.len() - 1 - i, WAIT_AFTER_SPEECH_WINDOWS),
+        None => (loud.len(), WAIT_BEFORE_SPEECH_WINDOWS),
+    };
+    if quiet >= limit {
         LiveWarning::Low
     } else {
         LiveWarning::None
@@ -376,6 +474,10 @@ impl Recorder {
             levels.loud_windows,
             levels.loud_windows * SILENCE_WINDOW_MS
         );
+        println!(
+            "[audio] 明顯大聲的區段（已略過開頭 {START_SKIP_MS}ms）：{}",
+            format_segments(&loud_segments(&window_rms(&samples, sample_rate)))
+        );
         if levels.is_silent() {
             println!("[audio] 音量起伏與底噪無異，判定為未說話，跳過辨識");
             return Ok(None);
@@ -549,7 +651,8 @@ mod tests {
     fn a_short_utterance_in_a_long_quiet_recording_is_not_silent() {
         let mut samples = vec![0.0f32; RATE as usize * 2];
         let utterance = steady_noise(2_400, 0.3);
-        samples[8_000..10_400].copy_from_slice(&utterance);
+        // 要放在略過的開頭（START_SKIP_MS = 700ms）之後，從 1 秒處開始。
+        samples[16_000..18_400].copy_from_slice(&utterance);
         assert!(!silent(&samples));
     }
 
@@ -580,8 +683,9 @@ mod tests {
     #[test]
     fn analyze_levels_reports_peak_and_noise_floor() {
         let mut samples = vec![0.02f32; RATE as usize];
-        // 對齊視窗邊界（4_800 = 10 × 480），讓該視窗完整落在爆音上，期望值才好對照。
-        samples[4_800..5_280].fill(0.5);
+        // 對齊視窗邊界（11_520 = 24 × 480），讓該視窗完整落在爆音上，期望值才好對照；
+        // 必須落在略過的開頭（START_SKIP_MS）之後，否則不會被計入。
+        samples[11_520..12_000].fill(0.5); // 第 24 個視窗（約 0.72 秒），略過開頭 0.7 秒之後的第一個
         let levels = analyze_levels(&samples, RATE);
         assert!(
             (levels.peak - 0.5).abs() < 1e-4,
@@ -616,7 +720,7 @@ mod tests {
     fn steady_noise_is_low_regardless_of_level() {
         for level in [0.0005, 0.002, 0.02, 0.2] {
             assert_eq!(
-                warn(&steady_noise(RATE as usize * 3, level)),
+                warn(&steady_noise(RATE as usize * 6, level)),
                 LiveWarning::Low,
                 "level {level}"
             );
@@ -627,7 +731,7 @@ mod tests {
     fn speech_has_no_warning_across_levels() {
         for level in [0.002, 0.005, 0.05, 0.3] {
             assert_eq!(
-                warn(&speech_like(RATE as usize * 3, level)),
+                warn(&speech_like(RATE as usize * 6, level)),
                 LiveWarning::None,
                 "level {level}"
             );
@@ -654,8 +758,8 @@ mod tests {
     #[test]
     fn live_warning_is_unchanged_when_amplified() {
         for base in [
-            steady_noise(RATE as usize * 3, 0.004),
-            speech_like(RATE as usize * 3, 0.003),
+            steady_noise(RATE as usize * 6, 0.004),
+            speech_like(RATE as usize * 6, 0.003),
         ] {
             let v = warn(&base);
             for gain in [0.25, 4.0, 20.0] {
@@ -722,5 +826,69 @@ mod tests {
         }
         assert!(m.bars().iter().all(|&b| b == 0.0));
         assert_eq!(m.warning(), LiveWarning::None);
+    }
+
+    // ---- 新規則：先等 4 秒、講過話後等 8 秒、略過開頭 0.7 秒 ----
+
+    fn secs(n: f32) -> usize {
+        (RATE as f32 * n) as usize
+    }
+
+    #[test]
+    fn low_appears_after_four_quiet_seconds_when_nobody_has_spoken() {
+        // 開頭 0.7 秒不計，所以總長 4.6 秒（實際分析 3.9 秒）還不提醒，5 秒才提醒。
+        assert_eq!(warn(&steady_noise(secs(4.6), 0.002)), LiveWarning::None);
+        assert_eq!(warn(&steady_noise(secs(5.0), 0.002)), LiveWarning::Low);
+    }
+
+    #[test]
+    fn after_speech_a_pause_needs_eight_seconds_before_low() {
+        let mut s = speech_like(secs(2.0), 0.02);
+        s.extend(steady_noise(secs(7.0), 0.001));
+        assert_eq!(warn(&s), LiveWarning::None, "停頓 7 秒還不到 8 秒");
+        s.extend(steady_noise(secs(2.0), 0.001));
+        assert_eq!(warn(&s), LiveWarning::Low, "停頓滿 9 秒應提醒");
+    }
+
+    #[test]
+    fn speaking_again_clears_the_warning() {
+        let mut s = steady_noise(secs(6.0), 0.002);
+        assert_eq!(warn(&s), LiveWarning::Low);
+        s.extend(speech_like(secs(1.0), 0.05));
+        assert_eq!(warn(&s), LiveWarning::None);
+    }
+
+    #[test]
+    fn isolated_clicks_do_not_count_as_speech() {
+        let mut s = steady_noise(secs(9.0), 0.002);
+        // 每 2 秒一聲短促的敲擊（約 60ms，2~3 個視窗），1 秒內湊不滿 4 個明顯大聲的視窗。
+        for sec in [1.5, 3.5, 5.5, 7.5] {
+            let i = secs(sec);
+            for x in &mut s[i..i + 960] {
+                *x = 0.3;
+            }
+        }
+        assert_eq!(warn(&s), LiveWarning::Low);
+    }
+
+    /// 開始錄音的提示音會被筆電麥克風收進去；它不是說話，不能讓警告消失，
+    /// 也不能讓「沒講話的錄音」在停止時被當成有說話而送去辨識。
+    #[test]
+    fn the_start_chime_in_the_first_700ms_is_ignored() {
+        let mut s = vec![0.3; secs(0.5)];
+        s.extend(steady_noise(secs(5.0), 0.002));
+        assert_eq!(warn(&s), LiveWarning::Low);
+        assert!(silent(&s), "停止時也不該把開頭的提示音當成說話");
+    }
+
+    #[test]
+    fn loud_segments_reports_where_the_loud_parts_are_in_seconds() {
+        let mut s = steady_noise(secs(3.0), 0.001);
+        for x in &mut s[secs(1.5)..secs(1.8)] {
+            *x *= 50.0;
+        }
+        let segs = loud_segments(&window_rms(&s, RATE));
+        assert_eq!(segs.len(), 1, "{segs:?}");
+        assert!((segs[0].0 - 1.5).abs() < 0.05 && (segs[0].1 - 1.8).abs() < 0.05, "{segs:?}");
     }
 }

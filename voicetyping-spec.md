@@ -95,11 +95,11 @@
 | `Processing` | 處理中（⏳，轉錄＋校正期間） |
 | 錯誤（短暫） | 橘色，數秒後自動回 `Idle` |
 
-**膠囊浮動視窗（額外功能，使用者要求並已實作）：** 錄音時於螢幕底部置中顯示一顆膠囊：小麥克風圖示＋20 根隨音量跳動的波形條＋錄音秒數，一般模式為活力橙、翻譯模式為藍紫；音量過小時膠囊上方出現提示泡（琥珀「聲音太小」、紅「收不到聲音」）；錄音結束改顯示不確定進度條＋「處理中…」。（2026-11-15 由黑色麥克風剪影改為膠囊，使用者主動要求，剪影版本保留在 tag `v0.2.3`，不做樣式切換。設計見 `docs/superpowers/specs/2026-11-15-capsule-overlay-design.md`。）
+**膠囊浮動視窗（額外功能，使用者要求並已實作）：** 錄音時於螢幕底部置中顯示一顆膠囊：小麥克風圖示＋20 根隨音量跳動的波形條＋錄音秒數，一般模式為青綠、翻譯模式為藍紫；音量過小時膠囊上方出現提示泡（琥珀「聲音太小」、紅「收不到聲音」）；錄音結束改顯示不確定進度條＋「處理中…」。（2026-11-15 由黑色麥克風剪影改為膠囊，使用者主動要求，剪影版本保留在 tag `v0.2.3`，不做樣式切換。設計見 `docs/superpowers/specs/2026-11-15-capsule-overlay-design.md`。）
 
 - 視窗**不奪取輸入焦點、可點擊穿透、不進 Alt-Tab**，不影響使用者正在輸入的視窗。
 - 音量由音訊 callback 餵進記憶體內的即時音量計 `audio::Meter`（開始錄音 reset、停止後 clear，不留存樣本）；`overlay.rs` 每 ~33ms 取最近約 40ms 樣本分成 20 段 RMS，以 `meter` 事件（`{bars, warning}`）推給前端重繪。
-- 音量警告：錄音滿 2 秒才判斷；最近 2 秒幾乎全零 → 紅「收不到聲音」；至今的錄音會被靜音略過規則判成沒說話 → 琥珀「聲音太小」（與停止時的靜音略過共用同一份相對比值判準，不受 Windows 麥克風音量滑桿影響）。
+- 音量警告：錄音滿 2 秒才判斷；最近 2 秒幾乎全零 → 紅「收不到聲音」；否則看最近安靜了多久：從沒聽到說話 → 安靜滿 4 秒 → 琥珀「聲音太小」；說過話後 → 連續安靜滿 8 秒才提醒，再開口就清掉。錄音最前面 700ms 不計入判斷（避開開始錄音的提示音被麥克風收進去）；全部以相對於底噪的倍數判斷，不受 Windows 麥克風音量滑桿影響。停止時的靜音略過同樣略過開頭 700ms，但看整段錄音。
 
 ### 3.4 焦點視窗鎖定
 
@@ -329,7 +329,7 @@ translate_mode_active  = false       # 翻譯模式開關：開啟後下一次�
 16. **移除 API key 環境變數 fallback、修正校正 prompt 洩漏定界符**（2026-07-01，使用者主動要求）：`GROQ_API_KEY`/`.env`/`dotenvy` 整條路徑移除，API key 一律只能在設定視窗填入，錯誤訊息不再提及環境變數；同時修正校正用的 `SYSTEM_PROMPT` 與 user message，明確禁止把 `[逐字稿開始]`/`[逐字稿結束]` 這兩個分隔符號本身輸出出來（先前部分模型會把定界符也一起回傳）。（`config.rs`、`transcribe.rs`、`main.rs`、`Cargo.toml`）
 17. **STT 回應改用 `response_format=json` 並解析 `text` 欄位**（2026-07-01，使用者回報）：使用者換 STT 供應商後發現整包 JSON（含 `segments`/`usage`）被當成逐字稿。原本寫死 `response_format=text` 假設回應是純字串，但 `text` 非 Groq 預設值（預設是 `json`）且部分供應商不理會。改為送 `json` 並解析 `{"text": ...}`；容錯：JSON 物件缺 `text` 視為失敗、非 JSON 退回純文字。（`transcribe.rs`）
 18. **移除語言設定欄位，STT 一律自動偵測**（2026-07-01，使用者要求）：設定視窗的「語言」欄位與 `config.toml` 的 `language` 欄位整條移除（前端 UI → IPC → Config → STT 呼叫），STT 一律不送 `language` 參數、忠實轉錄原語言；同時放棄「指定 zh 時送繁體 prompt」，繁體轉換改全靠 LLM 校正。（`config.rs`、`commands.rs`、`transcribe.rs`、`controller.rs`、`ui/settings/`）
-19. **翻譯輸出（雙熱鍵版，2026-07-30，使用者主動要求並已實作，同日於里程碑 20 回退）**：新增可獨立設定的第二支翻譯熱鍵（`translate_hotkey`）與目標語言設定（`target_language`）；本次錄音開始時按的是哪顆鍵決定輸出走一般校正或翻譯（`OutputMode`）。翻譯使用獨立的 `TRANSLATE_SYSTEM_PROMPT_TEMPLATE`，一次 LLM 呼叫同時完成清理與翻譯，不受 `enable_correction` 影響，降級規則比照校正；overlay 疊加視窗翻譯模式改用藍紫色發光（一般模式維持活力橙）；歷史紀錄新增 `translated`/`target_language`/`source_text` 欄位並相容舊版無此欄位的 `history.json`；主熱鍵與翻譯熱鍵的可選項由 2 種擴充為 5 種（不含 `right_shift`：持續按右 Shift 打大寫字母會與正常打字衝突，故不提供）；翻譯熱鍵不可與主熱鍵相同，衝突時存檔會擋下、既有設定衝突則於啟動時停用並通知。（`config.rs`、`state.rs`、`hotkey.rs`、`transcribe.rs`、`controller.rs`、`commands.rs`、`overlay.rs`、`history.rs`、`main.rs`、`ui/settings/`、`ui/history/`、`ui/overlay/`）
+19. **翻譯輸出（雙熱鍵版，2026-07-30，使用者主動要求並已實作，同日於里程碑 20 回退）**：新增可獨立設定的第二支翻譯熱鍵（`translate_hotkey`）與目標語言設定（`target_language`）；本次錄音開始時按的是哪顆鍵決定輸出走一般校正或翻譯（`OutputMode`）。翻譯使用獨立的 `TRANSLATE_SYSTEM_PROMPT_TEMPLATE`，一次 LLM 呼叫同時完成清理與翻譯，不受 `enable_correction` 影響，降級規則比照校正；overlay 疊加視窗翻譯模式改用藍紫色發光（一般模式為青綠，2026-11-15 起；原為活力橙）；歷史紀錄新增 `translated`/`target_language`/`source_text` 欄位並相容舊版無此欄位的 `history.json`；主熱鍵與翻譯熱鍵的可選項由 2 種擴充為 5 種（不含 `right_shift`：持續按右 Shift 打大寫字母會與正常打字衝突，故不提供）；翻譯熱鍵不可與主熱鍵相同，衝突時存檔會擋下、既有設定衝突則於啟動時停用並通知。（`config.rs`、`state.rs`、`hotkey.rs`、`transcribe.rs`、`controller.rs`、`commands.rs`、`overlay.rs`、`history.rs`、`main.rs`、`ui/settings/`、`ui/history/`、`ui/overlay/`）
 20. **翻譯輸出改回單熱鍵＋設定切換（2026-07-31，使用者主動要求回退簡化）**：移除里程碑 19 的第二支翻譯熱鍵（`translate_hotkey`）與其衝突驗證（`validate_translate_hotkey`／`resolved_translate_key`），改為單一熱鍵維持不變、新增 `translate_mode_active` 設定（預設 `false`，設定視窗提供「啟用翻譯模式」勾選框）；`controller.rs` 在 `Idle→Recording` 轉換當下讀取這個開關決定 `OutputMode`，**不需重啟程式**。熱鍵可選項因此縮回 2 種（`right_alt`／`right_ctrl`），移除當初為雙熱鍵防衝突而加的 `scroll_lock`/`pause`/`insert`。翻譯提示詞、LLM 呼叫方式、降級規則、overlay 配色、歷史紀錄欄位皆沿用里程碑 19 的實作不變；托盤閒置 tooltip 新增顯示目前模式（`tray::set_idle_tooltip`）。（`config.rs`、`state.rs`、`hotkey.rs`、`controller.rs`、`commands.rs`、`tray.rs`、`ui/settings/`）
 21. **錄音浮動視窗改為膠囊**（2026-11-15，使用者主動要求）：取代黑色麥克風剪影（保留在 tag `v0.2.3`），20 根波形條＋錄音秒數＋兩級音量警告（琥珀「聲音太小」、紅「收不到聲音」）＋處理中進度條；即時音量計 `audio::Meter` 取代 `Arc<AtomicU32>`；警告與靜音略過共用同一份相對比值判準。（`audio.rs`、`overlay.rs`、`ui/overlay/`）
 
