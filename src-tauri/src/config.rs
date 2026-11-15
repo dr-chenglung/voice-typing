@@ -5,8 +5,12 @@
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
+
+/// 自訂整理提示詞的檔名，放在 `app_config_dir()`。獨立於 config.toml：舊版 0.2.x 存檔時
+/// 會洗掉它不認得的欄位，文字放在另一個檔案才不會因為切回舊版而遺失。
+const CUSTOM_PROMPT_FILE: &str = "custom_prompt.txt";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -45,6 +49,12 @@ pub struct Config {
     /// 而非一般校正。開始錄音當下讀取，不需要重啟程式即可生效。
     #[serde(default)]
     pub translate_mode_active: bool,
+    /// 整理風格選「自訂」：用 `custom_prompt` 取代內建提示詞。只存這個開關，文字不放 config.toml。
+    #[serde(default)]
+    pub use_custom_prompt: bool,
+    /// 自訂提示詞全文，啟動時從 `custom_prompt.txt` 載入；`#[serde(skip)]` 讓它不會寫進 config.toml。
+    #[serde(skip)]
+    pub custom_prompt: String,
 }
 
 fn default_stt_api_url() -> String {
@@ -73,7 +83,7 @@ impl Config {
     /// 依序找 app_config_dir/config.toml（權威位置）→ 執行檔目錄 → 當前目錄；
     /// 找不到則全用預設值。
     pub fn load(app: &AppHandle) -> Result<Self> {
-        let cfg = match find_config(app) {
+        let mut cfg: Config = match find_config(app) {
             Some(path) => {
                 let s = std::fs::read_to_string(&path)
                     .with_context(|| format!("讀取設定檔失敗: {}", path.display()))?;
@@ -86,7 +96,21 @@ impl Config {
                 toml::from_str("").unwrap()
             }
         };
+        if let Ok(dir) = config_dir(app) {
+            cfg.custom_prompt = read_custom_prompt(&dir);
+        }
         Ok(cfg)
+    }
+
+    /// 執行時真正要用的自訂提示詞：必須選了「自訂」**而且**文字非空白才回 `Some`。
+    /// 選了自訂但文字不見了（檔案被刪、被清空）時回 `None`，由呼叫端退回內建風格，
+    /// 避免把空的 system prompt 送給模型。
+    pub fn active_custom_prompt(&self) -> Option<&str> {
+        if self.use_custom_prompt && !self.custom_prompt.trim().is_empty() {
+            Some(self.custom_prompt.as_str())
+        } else {
+            None
+        }
     }
 
     /// 取得 STT API key：讀 config.toml 的 stt_api_key。
@@ -121,12 +145,28 @@ fn resolve_key(from_cfg: &str, label: &str) -> Result<String> {
     bail!("找不到{label} API key：請在設定視窗填入");
 }
 
-pub fn config_path(app: &AppHandle) -> Result<PathBuf> {
-    let dir = app
-        .path()
+/// 設定資料夾（Windows：`%APPDATA%\com.clhuang.voicetyping`），config.toml 與自訂提示詞都放這裡。
+pub fn config_dir(app: &AppHandle) -> Result<PathBuf> {
+    app.path()
         .app_config_dir()
-        .context("無法取得設定目錄（app_config_dir）")?;
-    Ok(dir.join("config.toml"))
+        .context("無法取得設定目錄（app_config_dir）")
+}
+
+pub fn config_path(app: &AppHandle) -> Result<PathBuf> {
+    Ok(config_dir(app)?.join("config.toml"))
+}
+
+/// 讀自訂提示詞；檔案不存在或讀不到都當作沒有（回空字串）。
+pub fn read_custom_prompt(dir: &Path) -> String {
+    std::fs::read_to_string(dir.join(CUSTOM_PROMPT_FILE)).unwrap_or_default()
+}
+
+/// 寫自訂提示詞；資料夾還不存在時先建立。
+pub fn write_custom_prompt(dir: &Path, text: &str) -> Result<()> {
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("建立設定目錄失敗: {}", dir.display()))?;
+    let path = dir.join(CUSTOM_PROMPT_FILE);
+    std::fs::write(&path, text).with_context(|| format!("寫入自訂提示詞失敗: {}", path.display()))
 }
 
 fn find_config(app: &AppHandle) -> Option<PathBuf> {
@@ -175,5 +215,55 @@ mod tests {
         let s = toml::to_string_pretty(&cfg).unwrap();
         let back: Config = toml::from_str(&s).unwrap();
         assert!(back.translate_mode_active);
+    }
+
+    fn unique_temp_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("voicetyping-test-{tag}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn use_custom_prompt_defaults_to_false() {
+        let cfg: Config = toml::from_str("").unwrap();
+        assert!(!cfg.use_custom_prompt);
+    }
+
+    /// 自訂提示詞的文字只存在獨立檔案，不進 config.toml：舊版 0.2.x 存檔時會洗掉它不認得的欄位。
+    #[test]
+    fn custom_prompt_text_is_never_written_into_config_toml() {
+        let mut cfg: Config = toml::from_str("").unwrap();
+        cfg.use_custom_prompt = true;
+        cfg.custom_prompt = "秘密提示詞".to_string();
+        let s = toml::to_string_pretty(&cfg).unwrap();
+        assert!(!s.contains("秘密提示詞"));
+        assert!(s.contains("use_custom_prompt = true"));
+    }
+
+    #[test]
+    fn custom_prompt_file_round_trips_and_missing_file_reads_as_empty() {
+        let dir = unique_temp_dir("prompt");
+        assert_eq!(read_custom_prompt(&dir), "");
+        write_custom_prompt(&dir, "第一行\n第二行").unwrap();
+        assert_eq!(read_custom_prompt(&dir), "第一行\n第二行");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 選了自訂但文字不見了或是空的，執行時必須退回內建風格，不能把空的 system prompt 送出去。
+    #[test]
+    fn active_custom_prompt_requires_flag_and_text() {
+        let mut cfg: Config = toml::from_str("").unwrap();
+        for (flag, text, expected) in [
+            (false, "x", None),
+            (true, "", None),
+            (true, "  \n", None),
+            (true, "x", Some("x")),
+        ] {
+            cfg.use_custom_prompt = flag;
+            cfg.custom_prompt = text.to_string();
+            assert_eq!(cfg.active_custom_prompt(), expected, "flag={flag} text={text:?}");
+        }
     }
 }

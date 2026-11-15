@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::config::Config;
 use crate::history::{self, HistoryEntry};
+use crate::transcribe;
 
 #[derive(Serialize)]
 pub struct ConfigView {
@@ -27,6 +28,8 @@ pub struct ConfigView {
 
     pub vocabulary: String,
     pub enable_formatting: bool,
+    /// 整理風格選「自訂」（文字另存於 custom_prompt.txt，見 `save_custom_prompt`）。
+    pub use_custom_prompt: bool,
 
     pub target_language: String,
     pub translate_mode_active: bool,
@@ -49,6 +52,8 @@ pub struct ConfigUpdate {
 
     pub vocabulary: String,
     pub enable_formatting: bool,
+    /// 整理風格選「自訂」（文字另存於 custom_prompt.txt，見 `save_custom_prompt`）。
+    pub use_custom_prompt: bool,
 
     pub target_language: String,
     pub translate_mode_active: bool,
@@ -68,6 +73,7 @@ pub fn get_config(cfg: State<'_, Arc<Mutex<Config>>>) -> ConfigView {
         hotkey: c.hotkey.clone(),
         vocabulary: c.vocabulary.clone(),
         enable_formatting: c.enable_formatting,
+        use_custom_prompt: c.use_custom_prompt,
         target_language: c.target_language.clone(),
         translate_mode_active: c.translate_mode_active,
     }
@@ -107,6 +113,8 @@ pub fn save_config(
     validate_config_update(&update)?;
     let snapshot = {
         let mut c = cfg.lock().unwrap();
+        // 選「自訂」但自訂文字還是空的：整個存檔拒絕、不改任何設定。
+        validate_custom_prompt(update.use_custom_prompt, &c.custom_prompt)?;
         c.stt_api_key = update.stt_api_key.trim().to_string();
         c.stt_api_url = update.stt_api_url;
         c.stt_model = update.stt_model;
@@ -117,11 +125,55 @@ pub fn save_config(
         c.hotkey = update.hotkey;
         c.vocabulary = update.vocabulary;
         c.enable_formatting = update.enable_formatting;
+        c.use_custom_prompt = update.use_custom_prompt;
         c.target_language = update.target_language;
         c.translate_mode_active = update.translate_mode_active;
         c.clone()
     };
     snapshot.save(&app).map_err(|e| e.to_string())
+}
+
+/// 選「自訂」時，自訂提示詞不可是空的（空白也算空），否則存檔會讓整理步驟送出空的 system prompt。
+pub fn validate_custom_prompt(use_custom: bool, custom_prompt: &str) -> Result<(), String> {
+    if use_custom && custom_prompt.trim().is_empty() {
+        Err("自訂提示詞還是空的，請先寫內容，或按「從基本型複製」".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+/// 設定頁「AI 整理風格」要顯示的提示詞：內建兩種為實際送出的文字（不含個人詞彙表段），
+/// 另附目前存的自訂提示詞。
+#[derive(Serialize)]
+pub struct StylePrompts {
+    pub basic: String,
+    pub active: String,
+    pub custom: String,
+}
+
+#[tauri::command]
+pub fn get_style_prompts(cfg: State<'_, Arc<Mutex<Config>>>) -> StylePrompts {
+    let custom = cfg.lock().unwrap().custom_prompt.clone();
+    StylePrompts {
+        basic: transcribe::builtin_prompt(false),
+        active: transcribe::builtin_prompt(true),
+        custom,
+    }
+}
+
+/// 存自訂提示詞（獨立檔案，不寫進 config.toml）。目前正選著「自訂」時不可存成空白。
+#[tauri::command]
+pub fn save_custom_prompt(
+    app: AppHandle,
+    cfg: State<'_, Arc<Mutex<Config>>>,
+    text: String,
+) -> Result<(), String> {
+    let use_custom = cfg.lock().unwrap().use_custom_prompt;
+    validate_custom_prompt(use_custom, &text)?;
+    let dir = crate::config::config_dir(&app).map_err(|e| e.to_string())?;
+    crate::config::write_custom_prompt(&dir, &text).map_err(|e| e.to_string())?;
+    cfg.lock().unwrap().custom_prompt = text;
+    Ok(())
 }
 
 #[tauri::command]
@@ -198,9 +250,30 @@ mod tests {
             hotkey: hotkey.to_string(),
             vocabulary: String::new(),
             enable_formatting: false,
+            use_custom_prompt: false,
             target_language: target_language.to_string(),
             translate_mode_active,
         }
+    }
+
+    #[test]
+    fn validate_custom_prompt_accepts_off_with_empty_text() {
+        assert!(validate_custom_prompt(false, "").is_ok());
+    }
+
+    #[test]
+    fn validate_custom_prompt_rejects_on_with_empty_text() {
+        assert!(validate_custom_prompt(true, "").is_err());
+    }
+
+    #[test]
+    fn validate_custom_prompt_rejects_on_with_whitespace_only() {
+        assert!(validate_custom_prompt(true, "  \n\t ").is_err());
+    }
+
+    #[test]
+    fn validate_custom_prompt_accepts_on_with_text() {
+        assert!(validate_custom_prompt(true, "我的提示詞").is_ok());
     }
 
     #[test]

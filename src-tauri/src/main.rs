@@ -60,6 +60,8 @@ fn main() {
             commands::clear_history,
             commands::get_config_path,
             commands::open_config_folder,
+            commands::get_style_prompts,
+            commands::save_custom_prompt,
             status::get_status,
         ])
         .setup(move |app| {
