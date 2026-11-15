@@ -15,7 +15,7 @@ const LANGUAGE_LABELS = {
 };
 
 export const { load, isDirty } = makePage({
-  title: "翻譯",
+  title: "翻譯模式",
   description: "開啟翻譯模式後，下一次用熱鍵錄音會直接翻譯成目標語言，而不是一般整理。",
   render: (cfg) => {
     const sel = languageSelection(cfg.target_language);
@@ -38,7 +38,7 @@ export const { load, isDirty } = makePage({
         <label id="target_language_custom_row"${sel.select === "__custom__" ? "" : " hidden"}>
           自訂目標語言（英文語言名稱，例：French）
           <input type="text" id="target_language_custom" value="${escapeHtml(sel.custom)}" placeholder="French" />
-        </label>` + hint("翻譯使用自己的提示詞，不受「整理風格」頁的選擇影響。"),
+        </label>` + hint("翻譯使用自己的提示詞，不受「AI 整理風格」頁的選擇影響；只有選「積極型」時，翻譯才會一併套用智慧排版。"),
       )
     );
   },

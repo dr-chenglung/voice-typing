@@ -314,7 +314,7 @@ button.reveal:hover {
   border-color: #3b82f6;
 }
 
-/* ---- 整理風格卡片 ---- */
+/* ---- AI 整理風格（單選卡片） ---- */
 .style-list {
   display: flex;
   flex-direction: column;
@@ -322,28 +322,40 @@ button.reveal:hover {
   margin-bottom: 12px;
 }
 
-button.style-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-  text-align: left;
-  padding: 14px 18px;
+.style-card {
   background: #ffffff;
-  color: #1f2937;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
+  padding: 12px 18px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-button.style-card:hover {
-  background: #f8fafc;
+.style-card:hover {
   border-color: #93c5fd;
 }
 
-button.style-card.active {
+.style-card.active {
   background: #eff6ff;
   border-color: #3b82f6;
+}
+
+label.style-head {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.style-head input[type="radio"] {
+  margin-top: 3px;
+  accent-color: #3b82f6;
+}
+
+.style-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .style-name {
@@ -354,6 +366,50 @@ button.style-card.active {
 .style-desc {
   font-size: 12px;
   color: #6b7280;
+}
+
+.style-card > button.link {
+  margin: 8px 0 0 28px;
+}
+
+.prompt-panel {
+  margin: 10px 0 2px 28px;
+}
+
+.prompt-text {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.prompt-text[readonly] {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.warning-text {
+  color: #b45309;
+}
+
+/* ---- 主頁的設定提醒 ---- */
+.card.warning {
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+
+.warning-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.info-value label {
+  margin: 0;
 }
 
 .badge {
@@ -378,7 +434,7 @@ button.style-card.active {
 
 .info-label {
   flex: none;
-  width: 80px;
+  width: 104px;
   color: #6b7280;
 }
 

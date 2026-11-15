@@ -2,7 +2,7 @@
 import { makePage, card, keyInput, textInput, textValue } from "../form-page.js";
 
 export const { load, isDirty } = makePage({
-  title: "語音辨識",
+  title: "語音辨識 API",
   description: "設定語音轉文字要使用的服務。",
   render: (cfg) =>
     card(

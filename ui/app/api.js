@@ -33,4 +33,9 @@ export async function saveFields(partial) {
 
 export const getStatus = () => invoke("get_status");
 export const getHistory = () => invoke("get_history");
+
+/** 內建兩種風格實際送出的提示詞（唯讀顯示用），以及目前存的自訂提示詞：{ basic, active, custom }。 */
+export const getStylePrompts = () => invoke("get_style_prompts");
+/** 存自訂提示詞（Rust 端寫在獨立檔案，不進 config.toml）。目前選著自訂時不可存成空白。 */
+export const saveCustomPrompt = (text) => invoke("save_custom_prompt", { text });
 export const clearHistory = () => invoke("clear_history");
